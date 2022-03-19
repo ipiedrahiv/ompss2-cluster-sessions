@@ -92,6 +92,7 @@ namespace ClusterPollingServices {
 				break;
 
 				case SYS_FINISH:
+				case RESIZE:
 					// * These messages are the last ones to be processes... they must be the last
 					// * of all to be handled ones
 					assert(_nonStealableLowPriorityMessage == nullptr);
@@ -147,6 +148,7 @@ namespace ClusterPollingServices {
 
 				case DATA_RAW:
 				case TOTAL_MESSAGE_TYPES:
+				case INIT_SPAWNED:
 					// We should never see these messages
 					FatalErrorHandler::fail(
 						"Message handler tried to queue a message type: ", msg->getName()
@@ -175,6 +177,7 @@ namespace ClusterPollingServices {
 				case SATISFIABILITY:
 				case RELEASE_ACCESS_AND_FINISH:
 				case TASK_FINISHED:
+				case RESIZE:
 					// These messages have no ordering constraints, so do nothing
 					break;
 
@@ -208,6 +211,7 @@ namespace ClusterPollingServices {
 
 				case DATA_RAW:
 				case TOTAL_MESSAGE_TYPES:
+				case INIT_SPAWNED:
 					// We should never see these messages
 					FatalErrorHandler::fail(
 						"Message handler tried to notifyDone a message type: ", msg->getName()
