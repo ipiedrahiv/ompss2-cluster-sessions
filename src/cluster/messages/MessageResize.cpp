@@ -18,14 +18,9 @@ MessageResize::MessageResize(int deltaNodes)
 bool MessageResize::handleMessage()
 {
 	const int deltaNodes = _content->_deltaNodes;
-	FatalErrorHandler::failIf(deltaNodes == 0, "Handling resize message with delta == 0");
 
-	if (deltaNodes > 0) {
-		// ClusterManager::nanos6_spawn(deltaNodes);
-	} else {
-		// TODO: implement this
-		FatalErrorHandler::fail("Shrink nodes not implemented yet");
-	}
+	FatalErrorHandler::failIf(deltaNodes == 0, "Handling resize message with delta == 0");
+	ClusterManager::nanos6_resize(deltaNodes);
 
 	return true;
 }

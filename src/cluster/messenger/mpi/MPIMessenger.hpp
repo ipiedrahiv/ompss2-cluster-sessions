@@ -175,6 +175,8 @@ public:
 
 	Message *checkMail() override;
 
+	bool nanos6_spawn() override;
+
 	inline void testCompletion(std::vector<Message *> &pending) override
 	{
 		testCompletionInternal<Message>(pending);

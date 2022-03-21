@@ -8,6 +8,7 @@
 #include "ClusterHybridManager.hpp"
 #include "messages/MessageSysFinish.hpp"
 #include "messages/MessageDataFetch.hpp"
+#include "messages/MessageResize.hpp"
 
 #include "messenger/Messenger.hpp"
 #include "polling-services/ClusterServicesPolling.hpp"
@@ -161,7 +162,16 @@ void ClusterManager::internal_reset() {
 
 		_thisNode = _clusterNodes[internalRank];
 		_masterNode = _clusterNodes[masterIndex];
+	} else {
+		// Assert the current size before increment.
+		// TODO: This needs change when shrinking with an if else
+		const size_t index = _clusterNodes.size();
+		assert(index == clusterSize + 1);
+		_clusterNodes.push_back(new ClusterNode(index, index, 0, false, index));
 	}
+
+	assert(_thisNode != nullptr);
+	assert(_masterNode != nullptr);
 }
 
 
@@ -330,3 +340,16 @@ void ClusterManager::fetchVector(
 	_singleton->_msn->sendMessage(msg, remoteNode);
 }
 
+void ClusterManager::nanos6_spawn(int delta)
+{
+	assert(delta > 0);
+
+	if (isMasterNode()) {
+		MessageResize msg(delta);
+		sendMessageToAll(&msg, true);
+	}
+
+	_msn->nanos6_spawn();
+	internal_reset();
+
+}

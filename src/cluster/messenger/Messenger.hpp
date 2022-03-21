@@ -145,6 +145,9 @@ public:
 		return _messageMaxSize;
 	}
 
+	//! Spawn new processes.
+	virtual bool nanos6_spawn() = 0;
+
 	//! \brief Test if sending Messages has completed
 	//!
 	//! This tests whether messages stored in the 'messages'

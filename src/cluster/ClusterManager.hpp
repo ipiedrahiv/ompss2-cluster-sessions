@@ -80,6 +80,8 @@ private:
 
 	void internal_reset();
 
+	void nanos6_spawn(int delta);
+
 public:
 	//! \brief Initialize the ClusterManager
 	//! This is called before initializing the memory allocator because it collects some
@@ -581,6 +583,19 @@ public:
 		return _singleton->_totalReadyTasks;
 	}
 
+	static void nanos6_resize(int deltaNodes)
+	{
+		assert(deltaNodes != 0);
+		assert(_singleton != nullptr);
+		assert(_singleton->_msn != nullptr);
+
+		if (deltaNodes > 0) {
+			_singleton->nanos6_spawn(deltaNodes);
+		} else {
+			// TODO: Shrinking code here.
+			FatalErrorHandler::fail("Shrinking nodes not implemented yet");
+		}
+	}
 };
 
 

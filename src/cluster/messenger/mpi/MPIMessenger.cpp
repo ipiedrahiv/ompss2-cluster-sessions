@@ -678,3 +678,30 @@ void MPIMessenger::summarizeSplit() const
 {
 	Instrument::summarizeSplit(_externalRank, _physicalNodeNum, _apprankNum);
 }
+
+
+bool MPIMessenger::nanos6_spawn()
+{
+	MPI_Comm newintra = MPI_COMM_NULL;               // Variable for intracomm
+	MPI_Comm newinter = MPI_COMM_NULL;               // Temporal intercomm
+
+	MPI_Info info;
+	MPI_Info_create(&info);
+	MPI_Info_set(info, "bind_to", "node");
+
+	int errcode = 0;
+
+	int success = MPI_Comm_spawn(_argv[0], &_argv[1], 1, info, 0, INTRA_COMM, &newinter, &errcode);
+	FatalErrorHandler::failIf(errcode == MPI_SUCCESS, "New process returned error code.");
+	FatalErrorHandler::failIf(success == MPI_ERR_SPAWN, "Error spawning new process.");
+
+	MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
+	MPI_Intercomm_merge(newinter, false, &newintra); // Create new intra
+
+	INTRA_COMM = newintra;                           // Reassign the intra to the new one
+	MPI_Comm_free(&newinter);                        // Free the created intercomm
+
+	MPI_Info_free(&info);
+
+	return true;
+}
