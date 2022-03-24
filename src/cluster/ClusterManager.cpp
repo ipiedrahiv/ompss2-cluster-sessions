@@ -114,7 +114,7 @@ ClusterManager::~ClusterManager()
 	_msn = nullptr;
 }
 
-// Static 
+// Static
 void ClusterManager::initClusterNamespace(void (*func)(void *), void *args)
 {
 	assert(_singleton != nullptr);
@@ -351,5 +351,9 @@ void ClusterManager::nanos6_spawn(int delta)
 
 	_msn->nanos6_spawn();
 	internal_reset();
+
+	if (isMasterNode()) {
+		
+	}
 
 }
