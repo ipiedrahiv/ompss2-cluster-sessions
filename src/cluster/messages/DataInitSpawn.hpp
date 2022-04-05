@@ -8,8 +8,6 @@
 #define DATA_INIT_SPAWNED_HPP
 
 #include <nanos6/cluster.h>
-#include "ClusterMemoryManagement.hpp"
-#include <DistributionPolicy.hpp>
 #include <VirtualMemoryManagement.hpp>
 
 struct DataInitSpawn {
@@ -22,7 +20,6 @@ struct DataInitSpawn {
 			= VirtualMemoryManagement::getAllocations()[0];
 
 		_virtualRegion = DataAccessRegion(allocation->getStartAddress(), allocation->getSize());
-		
 	}
 
 };

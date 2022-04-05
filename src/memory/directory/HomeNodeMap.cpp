@@ -11,10 +11,8 @@
 #include "lowlevel/FatalErrorHandler.hpp"
 #include "hardware/places/MemoryPlace.hpp"
 
-void HomeNodeMap::insert(
-	DataAccessRegion const &region,
-	MemoryPlace const *homeNode
-) {
+void HomeNodeMap::insert(DataAccessRegion const &region, MemoryPlace const *homeNode)
+{
 	lock.writeLock();
 
 	processIntersectingAndMissing(

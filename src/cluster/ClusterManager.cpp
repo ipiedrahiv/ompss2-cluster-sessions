@@ -11,8 +11,6 @@
 #include "messages/MessageResize.hpp"
 #include "messages/DataInitSpawn.hpp"
 
-#include "messages/DataInitSpawn.hpp"
-
 #include "messenger/Messenger.hpp"
 #include "polling-services/ClusterServicesPolling.hpp"
 #include "polling-services/ClusterServicesTask.hpp"
@@ -51,7 +49,8 @@ ClusterManager::ClusterManager()
 	_thisNode(new ClusterNode(0, 0, 0, false, 0)),
 	_masterNode(_thisNode),
 	_msn(nullptr),
-	_disableRemote(false), _disableRemoteConnect(false), _disableAutowait(false)
+	_disableRemote(false), _disableRemoteConnect(false), _disableAutowait(false),
+	_dataInit(nullptr)
 {
 	assert(_singleton == nullptr);
 	_clusterNodes[0] = _thisNode;
@@ -63,7 +62,8 @@ ClusterManager::ClusterManager()
 ClusterManager::ClusterManager(std::string const &commType, int argc, char **argv)
 	: _clusterRequested(true),
 	_msn(GenericFactory<std::string,Messenger*,int,char**>::getInstance().create(commType, argc, argv)),
-	_disableRemote(false), _disableRemoteConnect(false), _disableAutowait(false)
+	_disableRemote(false), _disableRemoteConnect(false), _disableAutowait(false),
+	_dataInit(nullptr)
 {
 	assert(_msn != nullptr);
 	TaskOffloading::RemoteTasksInfoMap::init();
@@ -103,13 +103,13 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 	_numMaxNodes = numMaxNodes.getValue();
 
 	if (_msn->isSpawned()) {
-
-		
+		_dataInit = new DataInitSpawn();
+		assert(_dataInit != nullptr);
+		DataAccessRegion region(&_dataInit, sizeof(DataInitSpawn));
+		fetchDataRaw(region, getMasterNode()->getMemoryNode(), 1, true, false);
 
 		this->_msn->synchronizeAll();
 	}
-
-
 }
 
 ClusterManager::~ClusterManager()
@@ -125,6 +125,10 @@ ClusterManager::~ClusterManager()
 
 	delete _msn;
 	_msn = nullptr;
+
+	if (_dataInit != nullptr) {
+		delete _dataInit;
+	}
 }
 
 // Static

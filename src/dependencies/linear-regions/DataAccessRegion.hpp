@@ -144,9 +144,19 @@ public:
 
 	bool fullyContainedIn(DataAccessRegion const &other) const
 	{
-		return intersect(other) == *this;
+		return (other.getStartAddress() <= this->getStartAddress()
+			&& this->getEndAddress() <= other.getEndAddress());
 	}
 
+	bool fullyContainsRegion(DataAccessRegion const &other) const
+	{
+		return other.fullyContainedIn(*this);
+	}
+
+	bool containsAddress(void *ptr) const
+	{
+		return (getStartAddress() <= ptr && ptr < getEndAddress());
+	}
 
 	void processIntersectingFragments(
 		DataAccessRegion const &fragmeterRegion,

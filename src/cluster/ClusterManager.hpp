@@ -23,6 +23,8 @@
 #include <ClusterShutdownCallback.hpp>
 #include "memory/directory/Directory.hpp"
 
+#include "messages/DataInitSpawn.hpp"
+
 namespace ExecutionWorkflow
 {
 	class ClusterDataCopyStep;
@@ -70,6 +72,8 @@ private:
 	bool _autoOptimizeReadOnly;
 
 	int _numMessageHandlerWorkers;
+
+	struct DataInitSpawn *_dataInit;
 
 	//! private constructors. This is a singleton.
 	ClusterManager();
@@ -190,14 +194,17 @@ public:
 	}
 
 
-	//! \brief Check if current node is the master
-	//!
-	//! \returns true if the current node is the master
-	static inline bool isSpawned()
+	//! \brief Returns the init data received during the initialization.
+	static inline DataInitSpawn *getInitData()
 	{
 		assert(_singleton != nullptr);
 		assert(_singleton->_msn != nullptr);
-		return _singleton->_msn->isSpawned();
+#ifndef NDEBUG
+		if (_singleton->_msn->isSpawned()) {
+			assert(_singleton->_dataInit != nullptr);
+		}
+#endif
+		return _singleton->_dataInit;
 	}
 
 	//! \brief Get the number of cluster nodes

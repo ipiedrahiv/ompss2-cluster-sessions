@@ -8,8 +8,11 @@
 #define __VIRTUAL_MEMORY_MANAGEMENT_HPP__
 
 #include "memory/vmm/VirtualMemoryArea.hpp"
+#include <ClusterNode.hpp>
+#include <Directory.hpp>
 
 #include <vector>
+
 
 class VirtualMemoryManagement {
 public:
@@ -58,8 +61,12 @@ private:
 	//! addresses for generic allocations
 	VirtualMemoryArea *_genericVMA;
 
+	void *_startAddress, *_distribAddress;
+
+	size_t  _distribSize, _localSizePerNode, _totalVirtualMemory;
+
 	//! Setting up the memory layout
-	void setupMemoryLayout(void *address, size_t distribSize, size_t localSize);
+	void setupMemoryLayout();
 
 	//! private constructor, this is a singleton.
 	VirtualMemoryManagement();
@@ -75,6 +82,8 @@ public:
 		assert(_singleton == nullptr);
 		_singleton = new VirtualMemoryManagement();
 		assert(_singleton != nullptr);
+
+		_singleton->setupMemoryLayout();
 	}
 
 	static inline void shutdown()
@@ -82,6 +91,19 @@ public:
 		assert(_singleton != nullptr);
 		delete _singleton;
 		_singleton = nullptr;
+	}
+
+	static void registerNodeLocalRegion(const ClusterNode *node)
+	{
+		assert(_singleton != nullptr);
+		// TODO: add some assertion here to check the region is nor already registered.
+		char *ptr = ((char *)_singleton->_startAddress
+			+ _singleton->_localSizePerNode * node->getIndex());
+
+		DataAccessRegion tmpRegion((void *)ptr, _singleton->_localSizePerNode);
+		assert(tmpRegion.getEndAddress() < _singleton->_distribAddress);
+
+		Directory::insert(tmpRegion, node->getMemoryNode());
 	}
 
 	/** allocate a block of generic addresses.
@@ -105,6 +127,8 @@ public:
 	{
 		assert(_singleton != nullptr);
 		VirtualMemoryArea *vma = _singleton->_localNUMAVMA.at(NUMAId);
+		assert(vma != nullptr);
+
 		return vma->allocBlock(size);
 	}
 
@@ -114,11 +138,10 @@ public:
 	{
 		assert(_singleton != nullptr);
 		for (size_t i = 0; i < _singleton->_localNUMAVMA.size(); ++i) {
-			if (_singleton->_localNUMAVMA[i]->includesAddress(ptr)) {
+			if (_singleton->_localNUMAVMA[i]->containsAddress(ptr)) {
 				return i;
 			}
 		}
-
 		//! Non-NUMA allocation
 		return _singleton->_localNUMAVMA.size();
 	}
@@ -131,7 +154,7 @@ public:
 	static inline bool isDistributedRegion(DataAccessRegion const &region)
 	{
 		assert(_singleton != nullptr);
-		return _singleton->_genericVMA->includesRange(region.getStartAddress(), region.getSize());
+		return _singleton->_genericVMA->fullyContainsRegion(region);
 	}
 
 	//! \brief Check if a memory region is (cluster) local memory
@@ -143,7 +166,10 @@ public:
 	{
 		assert(_singleton != nullptr);
 		for (const auto &it : _singleton->_localNUMAVMA) {
-			if (it->includesRange(region.getStartAddress(), region.getSize())) {
+			// TODO: I think there is a bug here. a region could be crossing boundaries between two
+			// contiguous numa nodes; so fullyContainsRegion will return false in spite of it is
+			// local.
+			if (it->fullyContainsRegion(region)) {
 				return true;
 			}
 		}
@@ -161,9 +187,11 @@ public:
 		return isDistributedRegion(region) || isLocalRegion(region);
 	}
 
+
 	static inline std::vector<VirtualMemoryManagement::VirtualMemoryAllocation *> getAllocations()
 	{
 		assert(_singleton != nullptr);
+		assert(_singleton->_allocations.size() > 0);
 		return _singleton->_allocations;
 	}
 
