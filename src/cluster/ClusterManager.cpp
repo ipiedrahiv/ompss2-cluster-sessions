@@ -9,6 +9,7 @@
 #include "messages/MessageSysFinish.hpp"
 #include "messages/MessageDataFetch.hpp"
 #include "messages/MessageResize.hpp"
+#include "messages/DataInitSpawn.hpp"
 
 #include "messenger/Messenger.hpp"
 #include "polling-services/ClusterServicesPolling.hpp"
@@ -340,20 +341,37 @@ void ClusterManager::fetchVector(
 	_singleton->_msn->sendMessage(msg, remoteNode);
 }
 
-void ClusterManager::nanos6_spawn(int delta)
+void ClusterManager::nanos6Spawn(int delta)
 {
 	assert(delta > 0);
 
+	const int oldSize = clusterSize();
+
 	if (isMasterNode()) {
-		MessageResize msg(delta);
-		sendMessageToAll(&msg, true);
+		MessageResize msg_spawn(delta);
+		sendMessageToAll(&msg_spawn, true);
 	}
 
-	_msn->nanos6_spawn();
+	assert(delta == 1);        // TODO: This assertion is temporal.
+	_msn->nanos6Spawn(delta);
 	internal_reset();
 
+	const int newSize = clusterSize();
+	assert(newSize - oldSize == delta);
+
 	if (isMasterNode()) {
-		
+		DataInitSpawn data_init;
+		DataAccessRegion msg_region((void *)&data_init, sizeof(DataInitSpawn));
+
+		for (int i = oldSize; i < newSize; ++i) {
+
+			ClusterNode *target = getClusterNode(i);
+			assert(target != nullptr);
+			assert(target->getMemoryNode() != nullptr);
+
+			sendDataRaw(msg_region, target->getMemoryNode(), 1, true);
+		}
 	}
 
+	synchronizeAll(); // TODO: This is not needed, so remove latter.
 }

@@ -258,7 +258,7 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 	ConfigVariable<bool> mpi_comm_data_raw("cluster.mpi.comm_data_raw");
 	_mpi_comm_data_raw = mpi_comm_data_raw.getValue();
 
-	this->internal_reset();
+	internalReset();
 }
 
 
@@ -309,7 +309,7 @@ MPIMessenger::~MPIMessenger()
 #endif // NDEBUG
 }
 
-void MPIMessenger::internal_reset()
+void MPIMessenger::internalReset()
 {
 	int ret;
 	//! make sure the new communicator returns errors
@@ -680,8 +680,9 @@ void MPIMessenger::summarizeSplit() const
 }
 
 
-bool MPIMessenger::nanos6_spawn()
+bool MPIMessenger::nanos6Spawn(int delta)
 {
+	assert(delta > 0);
 	MPI_Comm newintra = MPI_COMM_NULL;               // Variable for intracomm
 	MPI_Comm newinter = MPI_COMM_NULL;               // Temporal intercomm
 
@@ -691,7 +692,7 @@ bool MPIMessenger::nanos6_spawn()
 
 	int errcode = 0;
 
-	int success = MPI_Comm_spawn(_argv[0], &_argv[1], 1, info, 0, INTRA_COMM, &newinter, &errcode);
+	int success = MPI_Comm_spawn(_argv[0], &_argv[1], delta, info, 0, INTRA_COMM, &newinter, &errcode);
 	FatalErrorHandler::failIf(errcode == MPI_SUCCESS, "New process returned error code.");
 	FatalErrorHandler::failIf(success == MPI_ERR_SPAWN, "Error spawning new process.");
 

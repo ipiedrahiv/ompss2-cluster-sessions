@@ -80,7 +80,7 @@ private:
 
 	void internal_reset();
 
-	void nanos6_spawn(int delta);
+	void nanos6Spawn(int delta);
 
 public:
 	//! \brief Initialize the ClusterManager
@@ -128,6 +128,7 @@ public:
 		assert(_singleton != nullptr);
 		assert(!_singleton->_clusterNodes.empty());
 		assert((size_t)id < _singleton->_clusterNodes.size());
+		assert(_singleton->_clusterNodes[id] != nullptr);
 
 		return _singleton->_clusterNodes[id];
 	}
@@ -590,7 +591,7 @@ public:
 		assert(_singleton->_msn != nullptr);
 
 		if (deltaNodes > 0) {
-			_singleton->nanos6_spawn(deltaNodes);
+			_singleton->nanos6Spawn(deltaNodes);
 		} else {
 			// TODO: Shrinking code here.
 			FatalErrorHandler::fail("Shrinking nodes not implemented yet");

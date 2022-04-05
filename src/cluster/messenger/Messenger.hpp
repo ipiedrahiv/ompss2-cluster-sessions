@@ -138,6 +138,8 @@ public:
 	//! Returns true if this is the master node
 	virtual bool isMasterNode() const = 0;
 
+	virtual bool isSpawned() const = 0;
+
 	//! Get the max message size
 	size_t getMessageMaxSize() const
 	{
@@ -146,7 +148,7 @@ public:
 	}
 
 	//! Spawn new processes.
-	virtual bool nanos6_spawn() = 0;
+	virtual bool nanos6Spawn(int delta) = 0;
 
 	//! \brief Test if sending Messages has completed
 	//!

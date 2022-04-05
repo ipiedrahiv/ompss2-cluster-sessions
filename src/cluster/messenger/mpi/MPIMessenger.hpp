@@ -112,7 +112,7 @@ private:
 	template <typename T>
 	void testCompletionInternal(std::vector<T *> &pending);
 
-	void internal_reset();
+	void internalReset();
 
 	void forEachDataPart(
 		void *startAddress,
@@ -175,7 +175,7 @@ public:
 
 	Message *checkMail() override;
 
-	bool nanos6_spawn() override;
+	bool nanos6Spawn(int delta) override;
 
 	inline void testCompletion(std::vector<Message *> &pending) override
 	{
@@ -302,6 +302,12 @@ public:
 		} else {
 			return _internalRankToInstrumentationRank[i];
 		}
+	}
+
+	inline bool isSpawned() const override
+	{
+		assert(_wrank >= 0);
+		return (PARENT_COMM != MPI_COMM_NULL);
 	}
 };
 
