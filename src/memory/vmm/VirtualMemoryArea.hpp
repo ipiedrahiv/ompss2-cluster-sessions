@@ -44,7 +44,7 @@ public:
 		assert(_available > 0);
 	}
 
-	//! Virtual addresses should be unique, so can't copy this
+	//! Virtual addresses should be unique.
 	VirtualMemoryArea(VirtualMemoryArea const &) = delete;
 	VirtualMemoryArea operator=(VirtualMemoryArea const &) = delete;
 
@@ -64,8 +64,8 @@ public:
 
 	/** Returns a block of virtual address from the virtual memory area.
 	 *
-	 * This method is not thread-safe. Synchronization needs to be handled
-	 * externaly. */
+	 * This method is not thread-safe. Synchronization needs to be handled externally.
+	 */
 	inline void *allocBlock(size_t size)
 	{
 		/** Rounding up the size allocations to PAGE_SIZE is the easy

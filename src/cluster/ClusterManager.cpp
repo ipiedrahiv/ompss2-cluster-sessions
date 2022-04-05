@@ -11,6 +11,8 @@
 #include "messages/MessageResize.hpp"
 #include "messages/DataInitSpawn.hpp"
 
+#include "messages/DataInitSpawn.hpp"
+
 #include "messenger/Messenger.hpp"
 #include "polling-services/ClusterServicesPolling.hpp"
 #include "polling-services/ClusterServicesTask.hpp"
@@ -45,7 +47,7 @@ std::atomic<bool> ClusterServicesTask::_pausedServices(false);
 
 ClusterManager::ClusterManager()
 	: _clusterRequested(false),
-	_clusterNodes(1),
+	_clusterNodes(1), _numMaxNodes(1),
 	_thisNode(new ClusterNode(0, 0, 0, false, 0)),
 	_masterNode(_thisNode),
 	_msn(nullptr),
@@ -64,13 +66,11 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 	_disableRemote(false), _disableRemoteConnect(false), _disableAutowait(false)
 {
 	assert(_msn != nullptr);
-
 	TaskOffloading::RemoteTasksInfoMap::init();
 	TaskOffloading::OffloadedTasksInfoMap::init();
 
-	this->internal_reset();
-
-	_msn->synchronizeAll();
+	this->internalReset();
+	this->_msn->synchronizeAll();
 
 	ConfigVariable<bool> disableRemote("cluster.disable_remote");
 	_disableRemote = disableRemote.getValue();
@@ -98,6 +98,18 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 
 	ConfigVariable<int> numMessageHandlerWorkers("cluster.num_message_handler_workers");
 	_numMessageHandlerWorkers = numMessageHandlerWorkers.getValue();
+
+	ConfigVariable<int> numMaxNodes("cluster.num_max_nodes");
+	_numMaxNodes = numMaxNodes.getValue();
+
+	if (_msn->isSpawned()) {
+
+		
+
+		this->_msn->synchronizeAll();
+	}
+
+
 }
 
 ClusterManager::~ClusterManager()
@@ -123,11 +135,10 @@ void ClusterManager::initClusterNamespace(void (*func)(void *), void *args)
 }
 
 
-void ClusterManager::internal_reset() {
+void ClusterManager::internalReset() {
 
-	/** These are communicator-type indices. At the moment we have an
-	 * one-to-one mapping between communicator-type and runtime-type
-	 * indices for cluster nodes */
+	/** These are communicator-type indices. At the moment we have an one-to-one mapping between
+	 * communicator-type and runtime-type indices for cluster nodes */
 
 	const size_t clusterSize = _msn->getClusterSize();
 	const int apprankNum = _msn->getApprankNum();
@@ -138,22 +149,22 @@ void ClusterManager::internal_reset() {
 	const int masterIndex = _msn->getMasterIndex();
 
 	// TODO: Check if this initialization may conflict somehow.
-	MessageId::initialize(internalRank, clusterSize); // only need to be unique message IDs inside an apprank
-	WriteIDManager::initialize(internalRank, clusterSize);
-	OffloadedTaskIdManager::initialize(internalRank, clusterSize);
+	if (this->_clusterNodes.empty()) {
+		MessageId::initialize(internalRank, clusterSize);
+		WriteIDManager::initialize(internalRank, clusterSize);
+		OffloadedTaskIdManager::initialize(internalRank, clusterSize);
 
-	int numAppranks = _msn->getNumAppranks();
-	bool inHybridMode = numAppranks > 1;
+		const int numAppranks = _msn->getNumAppranks();
+		const bool inHybridMode = numAppranks > 1;
 
-	const std::vector<int> &internalRankToExternalRank = _msn->getInternalRankToExternalRank();
-	const std::vector<int> &instanceThisNodeToExternalRank = _msn->getInstanceThisNodeToExternalRank();
+		const std::vector<int> &internalRankToExternalRank = _msn->getInternalRankToExternalRank();
+		const std::vector<int> &instanceThisNodeToExternalRank = _msn->getInstanceThisNodeToExternalRank();
 
-	ClusterHybridManager::preinitialize(
-		inHybridMode, externalRank, apprankNum, internalRank, physicalNodeNum, indexThisPhysicalNode,
-		clusterSize, internalRankToExternalRank, instanceThisNodeToExternalRank
+		ClusterHybridManager::preinitialize(
+			inHybridMode, externalRank, apprankNum, internalRank, physicalNodeNum, indexThisPhysicalNode,
+			clusterSize, internalRankToExternalRank, instanceThisNodeToExternalRank
 		);
 
-	if (this->_clusterNodes.empty()) {
 		// Called from constructor the first time
 		this->_clusterNodes.resize(clusterSize);
 
@@ -166,9 +177,14 @@ void ClusterManager::internal_reset() {
 	} else {
 		// Assert the current size before increment.
 		// TODO: This needs change when shrinking with an if else
-		const size_t index = _clusterNodes.size();
-		assert(index == clusterSize + 1);
-		_clusterNodes.push_back(new ClusterNode(index, index, 0, false, index));
+		const size_t oldSize = _clusterNodes.size();
+
+		// TODO: This assertion is temporal.
+		assert(clusterSize > oldSize);
+
+		for (size_t i = oldSize; i < clusterSize; ++i) {
+			_clusterNodes.push_back(new ClusterNode(i, i, 0, false, i));
+		}
 	}
 
 	assert(_thisNode != nullptr);
@@ -354,7 +370,7 @@ void ClusterManager::nanos6Spawn(int delta)
 
 	assert(delta == 1);        // TODO: This assertion is temporal.
 	_msn->nanos6Spawn(delta);
-	internal_reset();
+	internalReset();
 
 	const int newSize = clusterSize();
 	assert(newSize - oldSize == delta);

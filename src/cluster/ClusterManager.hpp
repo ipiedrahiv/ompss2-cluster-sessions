@@ -40,9 +40,9 @@ private:
 
 	//! A vector of all ClusterNodes in the system.
 	//!
-	//! We might need to make this a map later on, when we start
-	//! adding/removing nodes
+	//! We might need to make this a map later on, when we start adding/removing nodes
 	std::vector<ClusterNode *> _clusterNodes;
+	int _numMaxNodes;
 
 	//! ClusterNode object of the current node
 	ClusterNode * _thisNode;
@@ -78,7 +78,7 @@ private:
 
 	~ClusterManager();
 
-	void internal_reset();
+	void internalReset();
 
 	void nanos6Spawn(int delta);
 
@@ -151,9 +151,10 @@ public:
 	static inline ClusterMemoryNode *getMemoryNode(int id)
 	{
 		assert(_singleton != nullptr);
-		assert(!_singleton->_clusterNodes.empty());
+		assert(_singleton->_clusterNodes.empty() ==  false);
+		assert((int)_singleton->_clusterNodes.size() > id);
 		assert(_singleton->_clusterNodes[id] != nullptr);
-		assert (!Directory::isDirectoryMemoryPlaceIdx(id));
+		assert(!Directory::isDirectoryMemoryPlaceIdx(id));
 		return _singleton->_clusterNodes[id]->getMemoryNode();
 	}
 
@@ -173,6 +174,7 @@ public:
 	{
 		assert(_singleton != nullptr);
 		assert(_singleton->_thisNode != nullptr);
+		assert(_singleton->_thisNode->getMemoryNode() != nullptr);
 		return _singleton->_thisNode->getMemoryNode();
 	}
 
@@ -185,6 +187,17 @@ public:
 		assert(_singleton->_thisNode != nullptr);
 		assert(_singleton->_masterNode != nullptr);
 		return _singleton->_masterNode == _singleton->_thisNode;
+	}
+
+
+	//! \brief Check if current node is the master
+	//!
+	//! \returns true if the current node is the master
+	static inline bool isSpawned()
+	{
+		assert(_singleton != nullptr);
+		assert(_singleton->_msn != nullptr);
+		return _singleton->_msn->isSpawned();
 	}
 
 	//! \brief Get the number of cluster nodes
@@ -208,6 +221,11 @@ public:
 	{
 		assert(_singleton != nullptr);
 		assert(!_singleton->_clusterNodes.empty());
+#ifndef NDEBUG
+		if (_singleton->_clusterNodes.size() > 0) {
+			assert(_singleton->_msn != nullptr);
+		}
+#endif
 		return _singleton->_clusterNodes.size() > 1;
 	}
 
@@ -238,6 +256,14 @@ public:
 	{
 		assert(_singleton);
 		return _singleton->_clusterRequested;
+	}
+
+	static inline int clusterMaxSize()
+	{
+		assert(_singleton != nullptr);
+		assert(!_singleton->_clusterNodes.empty());
+		assert(_singleton->_numMaxNodes > 0);
+		return _singleton->_numMaxNodes;
 	}
 
 	//! \brief Check for incoming messages
@@ -584,7 +610,7 @@ public:
 		return _singleton->_totalReadyTasks;
 	}
 
-	static void nanos6_resize(int deltaNodes)
+	static void nanos6Resize(int deltaNodes)
 	{
 		assert(deltaNodes != 0);
 		assert(_singleton != nullptr);

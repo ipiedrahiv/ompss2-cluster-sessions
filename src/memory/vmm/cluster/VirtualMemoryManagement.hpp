@@ -37,6 +37,10 @@ public:
 				"mapping virtual address space couldn't use address hint");
 		}
 
+		//! Virtual allocations should be unique, so can't copy
+		VirtualMemoryAllocation(VirtualMemoryAllocation const &) = delete;
+		VirtualMemoryAllocation operator=(VirtualMemoryAllocation const &) = delete;
+
 		~VirtualMemoryAllocation()
 		{
 			const int ret = munmap(this->getStartAddress(), this->getSize());

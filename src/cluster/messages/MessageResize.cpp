@@ -20,7 +20,7 @@ bool MessageResize::handleMessage()
 	const int deltaNodes = _content->_deltaNodes;
 
 	FatalErrorHandler::failIf(deltaNodes == 0, "Handling resize message with delta == 0");
-	ClusterManager::nanos6_resize(deltaNodes);
+	ClusterManager::nanos6Resize(deltaNodes);
 
 	return true;
 }

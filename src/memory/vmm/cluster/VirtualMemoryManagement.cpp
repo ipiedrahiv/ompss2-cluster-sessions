@@ -249,7 +249,7 @@ void VirtualMemoryManagement::setupMemoryLayout(void *address, size_t distribSiz
 	const size_t numaNodeCount =
 		HardwareInfo::getMemoryPlaceCount(nanos6_device_t::nanos6_host_device);
 	assert(numaNodeCount > 0);
-	_localNUMAVMA.resize(numaNodeCount);
+	_localNUMAVMA.reserve(numaNodeCount);
 
 	// Divide the address space between the NUMA nodes and the
 	// making sure that all areas have a size that is multiple
@@ -271,7 +271,7 @@ void VirtualMemoryManagement::setupMemoryLayout(void *address, size_t distribSiz
 			numaSize += pageSize;
 			extraPages--;
 		}
-		_localNUMAVMA[i] = new VirtualMemoryArea(ptr, numaSize);
+		_localNUMAVMA.push_back(new VirtualMemoryArea(ptr, numaSize));
 
 		// Register the region with the Directory
 		const DataAccessRegion numaRegion(ptr, numaSize);
