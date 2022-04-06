@@ -15,7 +15,7 @@
 
 // NOTE: The full version depends also on nanos6_major_api
 //       That is:   nanos6_major_api . nanos6_cluster_device_api
-enum nanos6_cluster_api_t { nanos6_cluster_api = 2 };
+enum nanos6_cluster_api_t { nanos6_cluster_api = 3 };
 
 #ifdef __cplusplus
 extern "C" {
@@ -139,6 +139,11 @@ void nanos6_set_early_release(nanos6_early_release_t early_release);
 //!
 //! \returns the communicator that can be used by the application
 int nanos6_get_app_communicator(void *);
+//! \brief Resize the cluster world size.
+//!
+//! \param[in] delta Number of nodes to add (>0) or remove (<0) from the world.
+//! \returns Same value than delta on success.
+int nanos6_cluster_resize(int delta);
 
 #ifdef __cplusplus
 }

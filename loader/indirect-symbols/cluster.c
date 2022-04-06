@@ -258,3 +258,16 @@ int nanos6_get_app_communicator(void *appcomm)
 
 	return (*symbol)(appcomm);
 }
+
+int nanos6_cluster_resize(int delta)
+{
+	typedef int nanos6_cluster_resize_t(int);
+
+	static nanos6_cluster_resize_t *symbol = NULL;
+	if (__builtin_expect(symbol == NULL, 0)) {
+		symbol = (nanos6_cluster_resize_t *) _nanos6_resolve_symbol(
+			"nanos6_cluster_resize", "cluster", NULL);
+	}
+
+	return (*symbol)(delta);
+}

@@ -361,7 +361,7 @@ void ClusterManager::fetchVector(
 	_singleton->_msn->sendMessage(msg, remoteNode);
 }
 
-void ClusterManager::nanos6Spawn(int delta)
+int ClusterManager::nanos6Spawn(int delta)
 {
 	assert(delta > 0);
 
@@ -394,4 +394,6 @@ void ClusterManager::nanos6Spawn(int delta)
 	}
 
 	synchronizeAll(); // TODO: This is not needed, so remove latter.
+
+	return delta;
 }
