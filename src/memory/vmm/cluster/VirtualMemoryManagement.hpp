@@ -188,7 +188,7 @@ public:
 	}
 
 
-	static inline std::vector<VirtualMemoryManagement::VirtualMemoryAllocation *> getAllocations()
+	static inline std::vector<VirtualMemoryManagement::VirtualMemoryAllocation *> &getAllocations()
 	{
 		assert(_singleton != nullptr);
 		assert(_singleton->_allocations.size() > 0);

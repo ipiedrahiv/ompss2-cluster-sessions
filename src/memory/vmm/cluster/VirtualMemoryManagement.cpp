@@ -29,7 +29,7 @@ VirtualMemoryManagement *VirtualMemoryManagement::_singleton = nullptr;
 //! process.
 //!
 //! \returns a vector of DataAccessRegion objects describing the mappings
-static std::vector<DataAccessRegion> findMappedRegions()
+static std::vector<DataAccessRegion> findMappedRegions(size_t ngaps)
 {
 	std::vector<DataAccessRegion> maps;
 
@@ -60,7 +60,7 @@ static std::vector<DataAccessRegion> findMappedRegions()
 				// Add an extra padding to the end of the heap.
 				// This avoids the nasty memory error we had long time ago.
 				if (submatch[3].str() == "[heap]") {
-					endAddress += HardwareInfo::getPhysicalMemorySize();
+					endAddress += (ngaps * HardwareInfo::getPhysicalMemorySize());
 				}
 
 				maps.emplace_back((void *)startAddress, (void *)endAddress);
@@ -88,7 +88,7 @@ static std::vector<DataAccessRegion> findMappedRegions()
 //!          if none available
 static DataAccessRegion findSuitableMemoryRegion()
 {
-	std::vector<DataAccessRegion> maps = findMappedRegions();
+	std::vector<DataAccessRegion> maps = findMappedRegions(2);
 	const size_t length = maps.size();
 	DataAccessRegion gap;
 
@@ -159,7 +159,7 @@ static DataAccessRegion findSuitableMemoryRegion()
 
 static bool checkIsUsableMemoryRegion(const DataAccessRegion &region)
 {
-	std::vector<DataAccessRegion> maps = findMappedRegions();
+	std::vector<DataAccessRegion> maps = findMappedRegions(1);
 	const size_t length = maps.size();
 
 	// Find the biggest gap locally
