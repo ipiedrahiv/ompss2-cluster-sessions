@@ -26,6 +26,8 @@
 #include "MessageId.hpp"
 #include "tasks/Task.hpp"
 
+#include "system/ompss/TaskWait.hpp"
+
 #include "executors/workflow/cluster/ExecutionWorkflowCluster.hpp"
 #include "executors/threads/WorkerThread.hpp"
 
@@ -69,8 +71,42 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 	TaskOffloading::RemoteTasksInfoMap::init();
 	TaskOffloading::OffloadedTasksInfoMap::init();
 
-	this->internalReset();
-	this->_msn->synchronizeAll();
+	const size_t clusterSize = _msn->getClusterSize();
+	const int apprankNum = _msn->getApprankNum();
+	const int externalRank = _msn->getExternalRank();
+	const int internalRank = _msn->getNodeIndex();  /* internal rank */
+	const int physicalNodeNum = _msn->getPhysicalNodeNum();
+	const int indexThisPhysicalNode = _msn->getIndexThisPhysicalNode();
+	const int masterIndex = _msn->getMasterIndex();
+
+	MessageId::initialize(internalRank, clusterSize);
+	WriteIDManager::initialize(internalRank, clusterSize);
+	OffloadedTaskIdManager::initialize(internalRank, clusterSize);
+
+	const int numAppranks = _msn->getNumAppranks();
+	const bool inHybridMode = numAppranks > 1;
+
+	const std::vector<int> &internalRankToExternalRank = _msn->getInternalRankToExternalRank();
+	const std::vector<int> &instanceThisNodeToExternalRank = _msn->getInstanceThisNodeToExternalRank();
+
+	ClusterHybridManager::preinitialize(
+		inHybridMode, externalRank, apprankNum, internalRank, physicalNodeNum, indexThisPhysicalNode,
+		clusterSize, internalRankToExternalRank, instanceThisNodeToExternalRank
+	);
+
+
+	// Called from constructor the first time
+	this->_clusterNodes.resize(clusterSize);
+
+	for (size_t i = 0; i < clusterSize; ++i) {
+		_clusterNodes[i] = new ClusterNode(i, i, apprankNum, inHybridMode, _msn->internalRankToInstrumentationRank(i));
+	}
+
+	_thisNode = _clusterNodes[internalRank];
+	_masterNode = _clusterNodes[masterIndex];
+
+	assert(_thisNode != nullptr);
+	assert(_masterNode != nullptr);
 
 	ConfigVariable<bool> disableRemote("cluster.disable_remote");
 	_disableRemote = disableRemote.getValue();
@@ -101,15 +137,6 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 
 	ConfigVariable<int> numMaxNodes("cluster.num_max_nodes");
 	_numMaxNodes = numMaxNodes.getValue();
-
-	if (_msn->isSpawned()) {
-		_dataInit = new DataInitSpawn();
-		assert(_dataInit != nullptr);
-		DataAccessRegion region(&_dataInit, sizeof(DataInitSpawn));
-		fetchDataRaw(region, getMasterNode()->getMemoryNode(), 1, true, false);
-
-		this->_msn->synchronizeAll();
-	}
 }
 
 ClusterManager::~ClusterManager()
@@ -127,7 +154,7 @@ ClusterManager::~ClusterManager()
 	_msn = nullptr;
 
 	if (_dataInit != nullptr) {
-		delete _dataInit;
+		free(_dataInit);
 	}
 }
 
@@ -136,63 +163,6 @@ void ClusterManager::initClusterNamespace(void (*func)(void *), void *args)
 {
 	assert(_singleton != nullptr);
 	NodeNamespace::init(func, args);
-}
-
-
-void ClusterManager::internalReset() {
-
-	/** These are communicator-type indices. At the moment we have an one-to-one mapping between
-	 * communicator-type and runtime-type indices for cluster nodes */
-
-	const size_t clusterSize = _msn->getClusterSize();
-	const int apprankNum = _msn->getApprankNum();
-	const int externalRank = _msn->getExternalRank();
-	const int internalRank = _msn->getNodeIndex();  /* internal rank */
-	const int physicalNodeNum = _msn->getPhysicalNodeNum();
-	const int indexThisPhysicalNode = _msn->getIndexThisPhysicalNode();
-	const int masterIndex = _msn->getMasterIndex();
-
-	// TODO: Check if this initialization may conflict somehow.
-	if (this->_clusterNodes.empty()) {
-		MessageId::initialize(internalRank, clusterSize);
-		WriteIDManager::initialize(internalRank, clusterSize);
-		OffloadedTaskIdManager::initialize(internalRank, clusterSize);
-
-		const int numAppranks = _msn->getNumAppranks();
-		const bool inHybridMode = numAppranks > 1;
-
-		const std::vector<int> &internalRankToExternalRank = _msn->getInternalRankToExternalRank();
-		const std::vector<int> &instanceThisNodeToExternalRank = _msn->getInstanceThisNodeToExternalRank();
-
-		ClusterHybridManager::preinitialize(
-			inHybridMode, externalRank, apprankNum, internalRank, physicalNodeNum, indexThisPhysicalNode,
-			clusterSize, internalRankToExternalRank, instanceThisNodeToExternalRank
-		);
-
-		// Called from constructor the first time
-		this->_clusterNodes.resize(clusterSize);
-
-		for (size_t i = 0; i < clusterSize; ++i) {
-			_clusterNodes[i] = new ClusterNode(i, i, apprankNum, inHybridMode, _msn->internalRankToInstrumentationRank(i));
-		}
-
-		_thisNode = _clusterNodes[internalRank];
-		_masterNode = _clusterNodes[masterIndex];
-	} else {
-		// Assert the current size before increment.
-		// TODO: This needs change when shrinking with an if else
-		const size_t oldSize = _clusterNodes.size();
-
-		// TODO: This assertion is temporal.
-		assert(clusterSize > oldSize);
-
-		for (size_t i = oldSize; i < clusterSize; ++i) {
-			_clusterNodes.push_back(new ClusterNode(i, i, 0, false, i));
-		}
-	}
-
-	assert(_thisNode != nullptr);
-	assert(_masterNode != nullptr);
 }
 
 
@@ -211,6 +181,18 @@ void ClusterManager::initialize(int argc, char **argv)
 		assert(argc > 0);
 		assert(argv != nullptr);
 		_singleton = new ClusterManager(commType.getValue(), argc, argv);
+
+		assert(_singleton->_msn != nullptr);
+		if (_singleton->_msn->isSpawned()) {
+			_singleton->_dataInit = (DataInitSpawn *) malloc(sizeof(DataInitSpawn));
+			assert(_singleton->_dataInit != nullptr);
+
+			DataAccessRegion region(_singleton->_dataInit, sizeof(DataInitSpawn));
+			fetchDataRaw(region, getMasterNode()->getMemoryNode(), 1, true, false);
+
+			synchronizeAll();
+		}
+
 	} else {
 		_singleton = new ClusterManager();
 	}
@@ -364,21 +346,33 @@ void ClusterManager::fetchVector(
 int ClusterManager::nanos6Spawn(int delta)
 {
 	assert(delta > 0);
+	assert(clusterSize() == _msn->getClusterSize());
 
 	const int oldSize = clusterSize();
 
-	if (isMasterNode()) {
+	// Master sends spawn messages to all the OLD world
+	if (isMasterNode() && oldSize > 1) {
 		MessageResize msg_spawn(delta);
 		sendMessageToAll(&msg_spawn, true);
 	}
 
 	assert(delta == 1);        // TODO: This assertion is temporal.
-	_msn->nanos6Spawn(delta);
-	internalReset();
 
-	const int newSize = clusterSize();
+	// messenger calls spawn and merge
+	const int delta_msg = _msn->nanos6Spawn(delta);
+	assert(delta_msg == delta);
+
+	const int newSize = _msn->getClusterSize();
 	assert(newSize - oldSize == delta);
 
+	// Register the new nodes and their memory
+	for (int i = oldSize; i < newSize; ++i) {
+		ClusterNode *node = new ClusterNode(i, i, 0, false, i);
+		_clusterNodes.push_back(node);
+		VirtualMemoryManagement::registerNodeLocalRegion(node);
+	}
+
+	// Then master sends the init message to the new processes.
 	if (isMasterNode()) {
 		DataInitSpawn data_init;
 		DataAccessRegion msg_region((void *)&data_init, sizeof(DataInitSpawn));
@@ -391,9 +385,34 @@ int ClusterManager::nanos6Spawn(int delta)
 
 			sendDataRaw(msg_region, target->getMemoryNode(), 1, true);
 		}
+
+		// If the initial world was 1 the polling services are not started
+		if (oldSize == 1) {
+			ClusterManager::postinitialize();
+		}
 	}
 
 	synchronizeAll(); // TODO: This is not needed, so remove latter.
 
 	return delta;
+}
+
+
+int ClusterManager::nanos6Resize(int delta)
+{
+	assert(delta != 0);
+	assert(_singleton != nullptr);
+	assert(_singleton->_msn != nullptr);
+
+	TaskWait::taskWait("nanos6Resize");
+
+	if (delta > 0) {
+		return _singleton->nanos6Spawn(delta);
+	} else {
+		// TODO: Shrinking code here.
+		FatalErrorHandler::fail("Shrinking nodes not implemented yet");
+		return 0;
+	}
+
+	return 0;
 }

@@ -82,8 +82,6 @@ private:
 
 	~ClusterManager();
 
-	void internalReset();
-
 	//! \brief Spawn new processes.
 	//!
 	//! \param[in] Number of desired new nodes
@@ -621,21 +619,8 @@ public:
 		return _singleton->_totalReadyTasks;
 	}
 
-	static int nanos6Resize(int delta)
-	{
-		assert(delta != 0);
-		assert(_singleton != nullptr);
-		assert(_singleton->_msn != nullptr);
+	static int nanos6Resize(int delta);
 
-		if (delta > 0) {
-			return _singleton->nanos6Spawn(delta);
-		} else {
-			// TODO: Shrinking code here.
-			FatalErrorHandler::fail("Shrinking nodes not implemented yet");
-		}
-
-		return delta;
-	}
 };
 
 

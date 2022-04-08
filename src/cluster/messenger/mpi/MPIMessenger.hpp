@@ -112,8 +112,6 @@ private:
 	template <typename T>
 	void testCompletionInternal(std::vector<T *> &pending);
 
-	void internalReset();
-
 	void forEachDataPart(
 		void *startAddress,
 		size_t size,
@@ -140,6 +138,7 @@ private:
 	void getNodeNumber();
 	void splitCommunicator(const std::string &clusterSplit);
 	void setApprankNumber(const std::string &clusterSplit, int &internalRank);
+	void shareDLBInfo();
 
 public:
 
@@ -175,7 +174,7 @@ public:
 
 	Message *checkMail() override;
 
-	bool nanos6Spawn(int delta) override;
+	int nanos6Spawn(int delta) override;
 
 	inline void testCompletion(std::vector<Message *> &pending) override
 	{

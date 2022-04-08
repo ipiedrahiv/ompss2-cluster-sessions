@@ -258,7 +258,21 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 	ConfigVariable<bool> mpi_comm_data_raw("cluster.mpi.comm_data_raw");
 	_mpi_comm_data_raw = mpi_comm_data_raw.getValue();
 
-	internalReset();
+	if (_mpi_comm_data_raw) {
+		ret = MPI_Comm_dup(INTRA_COMM, &INTRA_COMM_DATA_RAW);
+		MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
+	} else {
+		INTRA_COMM_DATA_RAW = INTRA_COMM;
+	}
+
+	ret = MPI_Comm_rank(INTRA_COMM, &_wrank);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	assert(_wrank >= 0);
+
+	ret = MPI_Comm_size(INTRA_COMM, &_wsize);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	assert(_wsize > 0);
+
 }
 
 
@@ -309,61 +323,63 @@ MPIMessenger::~MPIMessenger()
 #endif // NDEBUG
 }
 
-void MPIMessenger::internalReset()
+void MPIMessenger::shareDLBInfo()
 {
-	int ret;
-	//! make sure the new communicator returns errors
-	if (_mpi_comm_data_raw) {
-		ret = MPI_Comm_dup(INTRA_COMM, &INTRA_COMM_DATA_RAW);
-		MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
-	} else {
-		INTRA_COMM_DATA_RAW = INTRA_COMM;
-	}
+	// Note: If the All gather pattern continues, then maybe it worth considering to use
+	// MPI_Iallgather with a waitall at the end of all to create a single synchronization point.
 
-	ret = MPI_Comm_rank(INTRA_COMM, &_wrank);
+	// Create the application communicator (Hybrid MPI+OmpSs applications)
+	int ret = MPI_Comm_split(MPI_COMM_WORLD, _wrank, _apprankNum, &APP_COMM);
 	MPIErrorHandler::handle(ret, INTRA_COMM);
-	assert(_wrank >= 0);
-
-	ret = MPI_Comm_size(INTRA_COMM, &_wsize);
-	MPIErrorHandler::handle(ret, INTRA_COMM);
-	assert(_wsize > 0);
-
-    // Create the application communicator
-    MPI_Comm_split(MPI_COMM_WORLD, _wrank, _apprankNum, &APP_COMM);
-    if (_wrank > 0) {
+	if (_wrank > 0) {
 		//! Invalid to use application communicator on slave nodes
 		APP_COMM = MPI_COMM_NULL;
-    }
+	}
 
 	// Create map from internal rank to external rank
-	int *allExternalRanks = new int[_wsize];
-	MPI_Allgather(&_externalRank, 1, MPI_INT, allExternalRanks, 1, MPI_INT, INTRA_COMM);
 	_internalRankToExternalRank.resize(_wsize);
-	for (int i=0; i<_wsize; i++) {
-		_internalRankToExternalRank[i] = allExternalRanks[i];
-	}
-	delete[] allExternalRanks;
+	ret = MPI_Allgather(
+		&_externalRank, 1, MPI_INT,
+		_internalRankToExternalRank.data(), 1, MPI_INT, INTRA_COMM
+	);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
 
-	// Create map from number on node to external rank
-	MPI_Comm tempNodeComm;
-	allExternalRanks = new int[_numInstancesThisNode];
-	MPI_Comm_split(MPI_COMM_WORLD, /* color */ _physicalNodeNum, /* key */ _indexThisPhysicalNode, &tempNodeComm);
-	MPI_Allgather(&_externalRank, 1, MPI_INT, allExternalRanks, 1, MPI_INT, tempNodeComm);
+	// This node to external rank
 	_instanceThisNodeToExternalRank.resize(_numInstancesThisNode);
-	for (int i=0; i<_numInstancesThisNode; i++) {
-		_instanceThisNodeToExternalRank[i] = allExternalRanks[i];
-		// std::cout << "Extrank " << _externalRank << " instance " << i << "on node: " << _instanceThisNodeToExternalRank[i] << "\n";
-	}
-	delete[] allExternalRanks;
+	MPI_Comm tempNodeComm;
+	ret = MPI_Comm_split(
+		MPI_COMM_WORLD,
+		/* color */ _physicalNodeNum,
+		/* key */ _indexThisPhysicalNode,
+		&tempNodeComm
+	);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
 
-	// Create map from internal rank to instrumentation rank
-	int *allInstrumentationRanks = new int[_wsize];
-	MPI_Allgather(&_instrumentationRank, 1, MPI_INT, allInstrumentationRanks, 1, MPI_INT, INTRA_COMM);
+#ifndef NDEBUG
+	// This is a defensive check to assert that the next operation does not produce overflow...
+	// you know there are never not enough assertions
+	int checksize = 0;
+	ret = MPI_Comm_size(tempNodeComm, &checksize);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	assert(checksize == _numInstancesThisNode);
+#endif // NDEBUG
+
+	// External Rank
+	ret = MPI_Allgather(
+		&_externalRank, 1, MPI_INT,
+		_instanceThisNodeToExternalRank.data(), 1, MPI_INT, tempNodeComm
+	);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+
+	// Internal rank
 	_internalRankToInstrumentationRank.resize(_wsize);
-	for (int i=0; i<_wsize; i++) {
-		_internalRankToInstrumentationRank[i] = allInstrumentationRanks[i];
-	}
-	delete[] allInstrumentationRanks;
+	ret = MPI_Allgather(
+		&_instrumentationRank, 1, MPI_INT,
+		_internalRankToInstrumentationRank.data(), 1, MPI_INT, INTRA_COMM
+	);
+
+	ret = MPI_Comm_free(&tempNodeComm);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
 }
 
 void MPIMessenger::sendMessage(Message *msg, ClusterNode const *toNode, bool block)
@@ -680,7 +696,7 @@ void MPIMessenger::summarizeSplit() const
 }
 
 
-bool MPIMessenger::nanos6Spawn(int delta)
+int MPIMessenger::nanos6Spawn(int delta)
 {
 	assert(delta > 0);
 	MPI_Comm newintra = MPI_COMM_NULL;               // Variable for intracomm
@@ -688,13 +704,13 @@ bool MPIMessenger::nanos6Spawn(int delta)
 
 	MPI_Info info;
 	MPI_Info_create(&info);
-	MPI_Info_set(info, "bind_to", "node");
+	MPI_Info_set(info, "host", "s08r2b24");
 
 	int errcode = 0;
 
-	int success = MPI_Comm_spawn(_argv[0], &_argv[1], delta, info, 0, INTRA_COMM, &newinter, &errcode);
-	FatalErrorHandler::failIf(errcode == MPI_SUCCESS, "New process returned error code.");
-	FatalErrorHandler::failIf(success == MPI_ERR_SPAWN, "Error spawning new process.");
+	int ret = MPI_Comm_spawn(_argv[0], &_argv[1], delta, info, 0, INTRA_COMM, &newinter, &errcode);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	FatalErrorHandler::failIf(errcode != MPI_SUCCESS, "New process returned error code: ", errcode);
 
 	MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
 	MPI_Intercomm_merge(newinter, false, &newintra); // Create new intra
@@ -704,5 +720,24 @@ bool MPIMessenger::nanos6Spawn(int delta)
 
 	MPI_Info_free(&info);
 
-	return true;
+	//! make sure the new communicator returns errors
+	if (_mpi_comm_data_raw) {
+		MPI_Comm_free(&INTRA_COMM_DATA_RAW);
+		ret = MPI_Comm_dup(INTRA_COMM, &INTRA_COMM_DATA_RAW);
+		MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
+	} else {
+		INTRA_COMM_DATA_RAW = INTRA_COMM;
+	}
+
+	int newrank = -1, newsize = -1;;
+	ret = MPI_Comm_rank(INTRA_COMM, &newrank);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	assert(newrank == _wrank);
+
+	ret = MPI_Comm_size(INTRA_COMM, &newsize);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	assert(newsize = _wsize + delta);
+	_wsize = newsize;
+
+	return delta;
 }
