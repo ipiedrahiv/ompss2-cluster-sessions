@@ -44,7 +44,10 @@ private:
 	//!
 	//! We might need to make this a map later on, when we start adding/removing nodes
 	std::vector<ClusterNode *> _clusterNodes;
-	int _numMaxNodes;
+
+	//! Malleability variables
+	std::vector<std::string> _hostnames;
+	size_t _numMaxNodes;
 
 	//! ClusterNode object of the current node
 	ClusterNode * _thisNode;

@@ -31,6 +31,10 @@
 #include "executors/workflow/cluster/ExecutionWorkflowCluster.hpp"
 #include "executors/threads/WorkerThread.hpp"
 
+#if HAVE_SLURM
+#include "SlurmAPI.h"
+#endif // HAVE_SLURM
+
 TaskOffloading::RemoteTasksInfoMap *TaskOffloading::RemoteTasksInfoMap::_singleton = nullptr;
 TaskOffloading::OffloadedTasksInfoMap *TaskOffloading::OffloadedTasksInfoMap::_singleton = nullptr;
 ClusterManager *ClusterManager::_singleton = nullptr;
@@ -47,7 +51,7 @@ std::atomic<bool> ClusterServicesTask::_pausedServices(false);
 
 ClusterManager::ClusterManager()
 	: _clusterRequested(false),
-	_clusterNodes(1), _numMaxNodes(1),
+	_clusterNodes(1), _hostnames(), _numMaxNodes(1),
 	_thisNode(new ClusterNode(0, 0, 0, false, 0)),
 	_masterNode(_thisNode),
 	_msn(nullptr),
@@ -62,7 +66,7 @@ ClusterManager::ClusterManager()
 }
 
 ClusterManager::ClusterManager(std::string const &commType, int argc, char **argv)
-	: _clusterRequested(true),
+	: _clusterRequested(true), _hostnames(), _numMaxNodes(-1),
 	_msn(GenericFactory<std::string,Messenger*,int,char**>::getInstance().create(commType, argc, argv)),
 	_disableRemote(false), _disableRemoteConnect(false), _disableAutowait(false),
 	_dataInit(nullptr)
@@ -182,7 +186,14 @@ void ClusterManager::initialize(int argc, char **argv)
 		assert(argv != nullptr);
 		_singleton = new ClusterManager(commType.getValue(), argc, argv);
 
-		assert(_singleton->_msn != nullptr);
+#if HAVE_SLURM
+		if (isMasterNode()) {
+			_singleton->_hostnames = clusterHostManager::getNodeList();
+			FatalErrorHandler::warnIf(_singleton->_hostnames.size() > _singleton->_numMaxNodes,
+				"There are more nodes than num_max_nodes setting.");
+		}
+#endif // HAVE_SLURM
+
 		if (_singleton->_msn->isSpawned()) {
 			_singleton->_dataInit = (DataInitSpawn *) malloc(sizeof(DataInitSpawn));
 			assert(_singleton->_dataInit != nullptr);
