@@ -231,6 +231,7 @@ AC_ARG_ENABLE([cluster],
 if test x"${enable_cluster}" = x"yes" ; then
 	ac_use_cluster=yes
 	AC_DEMAND_MPI
+	AC_CHECK_LIBSLURM
 else
 	ac_use_cluster=no
 fi
@@ -409,6 +410,16 @@ if test x"${ac_use_cluster}" = x"yes" ; then
 	AC_MSG_RESULT([yes])
 	_AS_ECHO([   MPI CXXFLAGS... ${MPI_CXXFLAGS}])
 	_AS_ECHO([   MPI CXXLDFLAGS... ${MPI_CXXLDFLAGS}])
+
+	_AS_ECHO([])
+	_AS_ECHO_N([   Malleability (Slurm) is enabled... ])
+	if test x"${ac_use_libslurm}" = x"yes" ; then
+		AC_MSG_RESULT([yes])
+		_AS_ECHO([   slurm CPPFLAGS... ${libslurm_CPPFLAGS}])
+		_AS_ECHO([   slurm LIBS... ${libslurm_LIBS}])
+	else
+		AC_MSG_RESULT([no])
+	fi
 else
 	AC_MSG_RESULT([no])
 fi
