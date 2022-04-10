@@ -31,6 +31,7 @@ namespace ExecutionWorkflow
 }
 
 class ClusterMemoryNode;
+class MessageResize;
 
 class ClusterManager {
 
@@ -85,13 +86,13 @@ private:
 
 	~ClusterManager();
 
+public:
 	//! \brief Spawn new processes.
 	//!
 	//! \param[in] Number of desired new nodes
 	//! \returns On success returns delta.
-	int nanos6Spawn(int delta);
+	static int nanos6Spawn(const MessageResize *msg_spawn);
 
-public:
 	//! \brief Initialize the ClusterManager
 	//! This is called before initializing the memory allocator because it collects some
 	//! information needed by the memory allocator latter.

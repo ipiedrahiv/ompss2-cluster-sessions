@@ -696,7 +696,7 @@ void MPIMessenger::summarizeSplit() const
 }
 
 
-int MPIMessenger::nanos6Spawn(int delta)
+int MPIMessenger::nanos6Spawn(int delta, std::string hostname)
 {
 	assert(delta > 0);
 	MPI_Comm newintra = MPI_COMM_NULL;               // Variable for intracomm
@@ -704,7 +704,7 @@ int MPIMessenger::nanos6Spawn(int delta)
 
 	MPI_Info info;
 	MPI_Info_create(&info);
-	MPI_Info_set(info, "host", "s08r2b24");
+	MPI_Info_set(info, "host", hostname.c_str());
 
 	int errcode = 0;
 
@@ -739,5 +739,5 @@ int MPIMessenger::nanos6Spawn(int delta)
 	assert(newsize = _wsize + delta);
 	_wsize = newsize;
 
-	return delta;
+	return _wsize;
 }

@@ -354,71 +354,80 @@ void ClusterManager::fetchVector(
 	_singleton->_msn->sendMessage(msg, remoteNode);
 }
 
-int ClusterManager::nanos6Spawn(int delta)
+int ClusterManager::nanos6Spawn(const MessageResize *msg_spawn)
 {
+	assert(_singleton != nullptr);
+	assert(_singleton->_msn != nullptr);
+	assert(ClusterManager::isMasterNode());
+
+	const int delta = msg_spawn->getDelta();
+	const std::string hostname = msg_spawn->getHostname();
+
 	assert(delta > 0);
-	assert(clusterSize() == _msn->getClusterSize());
-
-	const int oldSize = clusterSize();
-
-	// Master sends spawn messages to all the OLD world
-	if (isMasterNode() && oldSize > 1) {
-		MessageResize msg_spawn(delta);
-		sendMessageToAll(&msg_spawn, true);
-	}
-
-	assert(delta == 1);        // TODO: This assertion is temporal.
+	const int oldSize = ClusterManager::clusterSize();
 
 	// messenger calls spawn and merge
-	const int delta_msg = _msn->nanos6Spawn(delta);
-	assert(delta_msg == delta);
-
-	const int newSize = _msn->getClusterSize();
-	assert(newSize - oldSize == delta);
+	const int newSize = _singleton->_msn->nanos6Spawn(delta, hostname);
+	assert(newSize == oldSize + delta);
 
 	// Register the new nodes and their memory
 	for (int i = oldSize; i < newSize; ++i) {
 		ClusterNode *node = new ClusterNode(i, i, 0, false, i);
-		_clusterNodes.push_back(node);
+		_singleton->_clusterNodes.push_back(node);
 		VirtualMemoryManagement::registerNodeLocalRegion(node);
 	}
-
-	// Then master sends the init message to the new processes.
-	if (isMasterNode()) {
-		DataInitSpawn data_init;
-		DataAccessRegion msg_region((void *)&data_init, sizeof(DataInitSpawn));
-
-		for (int i = oldSize; i < newSize; ++i) {
-
-			ClusterNode *target = getClusterNode(i);
-			assert(target != nullptr);
-			assert(target->getMemoryNode() != nullptr);
-
-			sendDataRaw(msg_region, target->getMemoryNode(), 1, true);
-		}
-
-		// If the initial world was 1 the polling services are not started
-		if (oldSize == 1) {
-			ClusterManager::postinitialize();
-		}
-	}
+	assert(ClusterManager::clusterSize() == newSize);
 
 	synchronizeAll(); // TODO: This is not needed, so remove latter.
 
-	return delta;
+	return newSize;
 }
 
 
 int ClusterManager::nanos6Resize(int delta)
 {
+	assert(ClusterManager::isMasterNode());
 	assert(delta != 0);
 	assert(_singleton != nullptr);
 	assert(_singleton->_msn != nullptr);
+	assert(_singleton->_hostnames.size() > 1);
 
 	TaskWait::taskWait("nanos6Resize");
 
+	const size_t oldSize = clusterSize();
+	assert(oldSize == (size_t)_singleton->_msn->getClusterSize());
+
+	FatalErrorHandler::failIf(oldSize < 1, "Old size can't be less than 1");
+
 	if (delta > 0) {
-		return _singleton->nanos6Spawn(delta);
+		assert(oldSize < _singleton->_hostnames.size());
+		assert(oldSize < _singleton->_numMaxNodes);
+
+		// Master sends spawn messages to all the OLD world
+		MessageResize msg_spawn(delta, _singleton->_hostnames[oldSize]);
+		if (oldSize == 1) {
+			ClusterManager::postinitialize();
+		} else if (oldSize > 1) {
+			ClusterManager::sendMessageToAll(&msg_spawn, true);
+		}
+
+		const int newSize = ClusterManager::nanos6Spawn(&msg_spawn);
+		assert((size_t)newSize == oldSize + delta);
+
+		// Then master sends the init message to the new processes.
+		DataInitSpawn data_init;
+		DataAccessRegion msg_region((void *)&data_init, sizeof(DataInitSpawn));
+
+		for (int i = oldSize; i < newSize; ++i) {
+
+			ClusterNode *target = ClusterManager::getClusterNode(i);
+			assert(target != nullptr);
+			assert(target->getMemoryNode() != nullptr);
+
+			ClusterManager::sendDataRaw(msg_region, target->getMemoryNode(), 1, true);
+		}
+
+		return newSize;
 	} else {
 		// TODO: Shrinking code here.
 		FatalErrorHandler::fail("Shrinking nodes not implemented yet");

@@ -148,7 +148,7 @@ public:
 	}
 
 	//! Spawn new processes.
-	virtual int nanos6Spawn(int delta) = 0;
+	virtual int nanos6Spawn(int delta, std::string hostname) = 0;
 
 	//! \brief Test if sending Messages has completed
 	//!

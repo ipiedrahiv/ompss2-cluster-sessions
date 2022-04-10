@@ -174,7 +174,7 @@ public:
 
 	Message *checkMail() override;
 
-	int nanos6Spawn(int delta) override;
+	int nanos6Spawn(int delta, std::string hostname) override;
 
 	inline void testCompletion(std::vector<Message *> &pending) override
 	{
