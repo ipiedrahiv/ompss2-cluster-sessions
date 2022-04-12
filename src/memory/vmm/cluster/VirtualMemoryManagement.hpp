@@ -101,7 +101,7 @@ public:
 			+ _singleton->_localSizePerNode * node->getIndex());
 
 		DataAccessRegion tmpRegion((void *)ptr, _singleton->_localSizePerNode);
-		assert(tmpRegion.getEndAddress() < _singleton->_distribAddress);
+		assert(tmpRegion.getEndAddress() <= _singleton->_distribAddress);
 
 		Directory::insert(tmpRegion, node->getMemoryNode());
 	}

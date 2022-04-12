@@ -107,8 +107,8 @@ static DataAccessRegion findSuitableMemoryRegion()
 		}
 	}
 
-	// If not in cluster mode, we are done here
-	if (!ClusterManager::inClusterMode()) {
+	// If not in cluster mode and malleability is disabled, we are done here
+	if (!ClusterManager::inClusterMode() && ClusterManager::clusterMalleableMaxSize() == 0) {
 		return gap;
 	}
 
@@ -205,7 +205,12 @@ VirtualMemoryManagement::VirtualMemoryManagement()
 	assert(_localSizePerNode > 0);
 	_localSizePerNode = ROUND_UP(_localSizePerNode, HardwareInfo::getPageSize());
 
-	const size_t maxSize = ClusterManager::clusterMaxSize();
+	// Get the maximum size, when zero malleability is disabled, when numeric limit something is
+	// wrong. If malleability is disabled then use the current cluster size.
+	int maxSize = ClusterManager::clusterMalleableMaxSize();
+	if (maxSize == 0) {
+		maxSize = ClusterManager::clusterSize();
+	}
 
 	_totalVirtualMemory = _distribSize + _localSizePerNode * maxSize;
 
@@ -296,7 +301,7 @@ void VirtualMemoryManagement::setupMemoryLayout()
 
 		size_t extraPages = localPages % numaNodeCount;
 		char *ptr = (char *)_startAddress + _localSizePerNode * node->getIndex();
-		assert(ptr + _localSizePerNode < _distribAddress);
+		assert(ptr + _localSizePerNode <= _distribAddress);
 
 		for (size_t i = 0; i < numaNodeCount; ++i) {
 			size_t numaSize = sizePerNUMA;

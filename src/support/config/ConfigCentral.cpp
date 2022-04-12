@@ -27,7 +27,7 @@ ConfigCentral::ConfigCentral() :
 	registerOption<bool_t>("cluster.disable_remote_connect", true);
 	registerOption<bool_t>("cluster.disable_autowait", false);
 	registerOption<integer_t>("cluster.num_message_handler_workers", 2);
-	registerOption<integer_t>("cluster.num_max_nodes", 128);
+	registerOption<integer_t>("cluster.num_max_nodes", 0);
 
 	registerOption<bool_t>("cluster.mpi.comm_data_raw", true);
 

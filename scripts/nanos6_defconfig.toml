@@ -331,6 +331,10 @@ __require_CLUSTER
 	# itself. Default is 2.
 	num_message_handler_workers = 2
 
+	# Limit number of nodes to use on malleability. When this
+	# variable is zero malleability is disabled
+	num_max_nodes = 0
+
 	[cluster.auto]
 		# Optimize non-accessed parts of auto accesses
 		optimize_nonaccessed = true

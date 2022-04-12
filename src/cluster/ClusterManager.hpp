@@ -271,11 +271,11 @@ public:
 		return _singleton->_clusterRequested;
 	}
 
-	static inline int clusterMaxSize()
+	static inline int clusterMalleableMaxSize()
 	{
 		assert(_singleton != nullptr);
 		assert(!_singleton->_clusterNodes.empty());
-		assert(_singleton->_numMaxNodes > 0);
+		assert(_singleton->_numMaxNodes != std::numeric_limits<size_t>::max());
 		return _singleton->_numMaxNodes;
 	}
 
