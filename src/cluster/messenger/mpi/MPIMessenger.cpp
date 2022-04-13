@@ -187,19 +187,9 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 		abort();
 	}
 
-	//! Get the upper-bound tag supported by current MPI implementation
-	int ubIsSetFlag = 0, *mpi_ub_tag = nullptr;
-	ret = MPI_Comm_get_attr(MPI_COMM_WORLD, MPI_TAG_UB, &mpi_ub_tag, &ubIsSetFlag);
-	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
-	assert(mpi_ub_tag != nullptr);
-	assert(ubIsSetFlag != 0);
-
-	_mpi_ub_tag = convertToBitMask(*mpi_ub_tag);
-	assert(_mpi_ub_tag > 0);
-
 	// Set the error handler to MPI_ERRORS_RETURN so we can use a check latter.  The error handler
-	// is inherited by any created messenger latter, so we don't need to set it again.  TODO:
-	// Instead of checking on every MPI call we must define a propper MPI error handler.  The
+	// is inherited by any created messenger latter, so we don't need to set it again.
+	// TODO: Instead of checking on every MPI call we must define a propper MPI error handler.  The
 	// problem with this is that some parameters are implementation specific...
 	ret = MPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_RETURN);
 	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
@@ -254,6 +244,16 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 	}
 	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
 
+	//! Get the upper-bound tag supported by current MPI implementation
+	int ubIsSetFlag = 0, *mpi_ub_tag = nullptr;
+	ret = MPI_Comm_get_attr(INTRA_COMM, MPI_TAG_UB, &mpi_ub_tag, &ubIsSetFlag);
+	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
+	assert(mpi_ub_tag != nullptr);
+	assert(ubIsSetFlag != 0);
+
+	_mpi_ub_tag = convertToBitMask(*mpi_ub_tag);
+	assert(_mpi_ub_tag > 0);
+
 	// Get the user config to use a different communicator for data_raw.
 	ConfigVariable<bool> mpi_comm_data_raw("cluster.mpi.comm_data_raw");
 	_mpi_comm_data_raw = mpi_comm_data_raw.getValue();
@@ -272,7 +272,6 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 	ret = MPI_Comm_size(INTRA_COMM, &_wsize);
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 	assert(_wsize > 0);
-
 }
 
 
