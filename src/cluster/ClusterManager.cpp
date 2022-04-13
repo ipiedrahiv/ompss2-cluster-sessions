@@ -51,7 +51,7 @@ std::atomic<bool> ClusterServicesTask::_pausedServices(false);
 
 ClusterManager::ClusterManager()
 	: _clusterRequested(false),
-	_clusterNodes(1), _hostnames(), _numMaxNodes(std::numeric_limits<size_t>::max()),
+	_clusterNodes(1), _hostnames(), _numMaxNodes(-1),
 	_thisNode(new ClusterNode(0, 0, 0, false, 0)),
 	_masterNode(_thisNode),
 	_msn(nullptr),
@@ -66,7 +66,7 @@ ClusterManager::ClusterManager()
 }
 
 ClusterManager::ClusterManager(std::string const &commType, int argc, char **argv)
-	: _clusterRequested(true), _hostnames(), _numMaxNodes(std::numeric_limits<size_t>::max()),
+	: _clusterRequested(true), _hostnames(), _numMaxNodes(-1),
 	_msn(GenericFactory<std::string,Messenger*,int,char**>::getInstance().create(commType, argc, argv)),
 	_disableRemote(false), _disableRemoteConnect(false), _disableAutowait(false),
 	_dataInit(nullptr)
@@ -187,21 +187,23 @@ void ClusterManager::initialize(int argc, char **argv)
 		_singleton = new ClusterManager(commType.getValue(), argc, argv);
 
 #if HAVE_SLURM
-		if (_singleton->_numMaxNodes != 0 && isMasterNode()) {
+		if (clusterMalleableMaxSize() != 0 && isMasterNode()) {
 			_singleton->_hostnames = clusterHostManager::getNodeList();
-			FatalErrorHandler::warnIf(_singleton->_hostnames.size() > _singleton->_numMaxNodes,
+
+			FatalErrorHandler::warnIf(
+				_singleton->_hostnames.size() > (size_t)clusterMalleableMaxSize(),
 				"There are more nodes than num_max_nodes setting.");
 		}
 #endif // HAVE_SLURM
 
 		if (_singleton->_msn->isSpawned()) {
+			ClusterManager::synchronizeAll();
+
 			_singleton->_dataInit = (DataInitSpawn *) malloc(sizeof(DataInitSpawn));
 			assert(_singleton->_dataInit != nullptr);
 
 			DataAccessRegion region(_singleton->_dataInit, sizeof(DataInitSpawn));
 			fetchDataRaw(region, getMasterNode()->getMemoryNode(), 1, true, false);
-
-			synchronizeAll();
 		}
 
 	} else {
@@ -358,17 +360,24 @@ int ClusterManager::nanos6Spawn(const MessageResize *msg_spawn)
 {
 	assert(_singleton != nullptr);
 	assert(_singleton->_msn != nullptr);
-	assert(ClusterManager::isMasterNode());
 
 	const int delta = msg_spawn->getDelta();
 	const std::string hostname = msg_spawn->getHostname();
 
 	assert(delta > 0);
+	const __attribute__((unused)) int oldIndex = _singleton->_msn->getNodeIndex();
 	const int oldSize = ClusterManager::clusterSize();
 
+	// Stop polling services.
+	if (oldSize > 1) {
+		ClusterServicesTask::setPauseStatus(true);
+		ClusterServicesPolling::setPauseStatus(true);
+	}
 	// messenger calls spawn and merge
 	const int newSize = _singleton->_msn->nanos6Spawn(delta, hostname);
 	assert(newSize == oldSize + delta);
+	const int newIndex = _singleton->_msn->getNodeIndex();
+	assert(newIndex == oldIndex);
 
 	// Register the new nodes and their memory
 	for (int i = oldSize; i < newSize; ++i) {
@@ -378,23 +387,38 @@ int ClusterManager::nanos6Spawn(const MessageResize *msg_spawn)
 	}
 	assert(ClusterManager::clusterSize() == newSize);
 
+	MessageId::reset(newIndex, newSize);
+	WriteIDManager::reset(newIndex, newSize);
+	OffloadedTaskIdManager::reset(newIndex, newSize);
+
+	ClusterManager::synchronizeAll();
+
+	if (oldSize == 1) {
+		ClusterServicesPolling::initialize();
+		ClusterServicesTask::initializeWorkers(_singleton->_numMessageHandlerWorkers);
+	} else {
+		assert(oldSize > 1);
+		ClusterServicesPolling::setPauseStatus(false);
+		ClusterServicesTask::setPauseStatus(false);
+	}
+
 	return newSize;
 }
 
 
 int ClusterManager::nanos6Resize(int delta)
 {
-	assert(ClusterManager::isMasterNode());
 	assert(delta != 0);
+	assert(ClusterManager::isMasterNode());
 	assert(_singleton != nullptr);
 	assert(_singleton->_msn != nullptr);
-	assert(_singleton->_numMaxNodes != std::numeric_limits<size_t>::max()); // Manager initialized
+	assert(_singleton->_numMaxNodes != -1); // Manager initialized
 	// There is more than one host... This will be corrected with multiple processes/node
 	assert(_singleton->_hostnames.size() > 1);
 
 	TaskWait::taskWait("nanos6Resize");
 
-	const size_t oldSize = clusterSize();
+	const size_t oldSize = ClusterManager::clusterSize();
 
 	if (delta == 0) {
 		return oldSize;
@@ -403,20 +427,17 @@ int ClusterManager::nanos6Resize(int delta)
 	assert(oldSize == (size_t)_singleton->_msn->getClusterSize());
 
 	FatalErrorHandler::failIf(oldSize < 1, "Old size can't be less than 1");
-	FatalErrorHandler::failIf(_singleton->_numMaxNodes != 0,
+	FatalErrorHandler::failIf(_singleton->_numMaxNodes == 0,
 		"Can't resize cluster, malleability is disabled (num_max_nodes == 0)");
 
 	if (delta > 0) {
 		assert(oldSize < _singleton->_hostnames.size());
-		assert(oldSize < _singleton->_numMaxNodes);
+		assert(oldSize < (size_t)_singleton->_numMaxNodes);
 
 		// Master sends spawn messages to all the OLD world
 		MessageResize msg_spawn(delta, _singleton->_hostnames[oldSize]);
-		if (oldSize == 1) {
-			ClusterManager::postinitialize();
-		} else if (oldSize > 1) {
-			ClusterManager::sendMessageToAll(&msg_spawn, true);
-		}
+
+		ClusterManager::sendMessageToAll(&msg_spawn, true);
 
 		// this is the same call that message handler does.
 		const int newSize = ClusterManager::nanos6Spawn(&msg_spawn);
@@ -425,7 +446,6 @@ int ClusterManager::nanos6Resize(int delta)
 		// Then master sends the init message to the new processes.
 		DataInitSpawn data_init;
 		DataAccessRegion msg_region((void *)&data_init, sizeof(DataInitSpawn));
-
 		for (int i = oldSize; i < newSize; ++i) {
 
 			ClusterNode *target = ClusterManager::getClusterNode(i);

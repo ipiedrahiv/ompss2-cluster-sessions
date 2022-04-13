@@ -48,7 +48,7 @@ private:
 
 	//! Malleability variables
 	std::vector<std::string> _hostnames;
-	size_t _numMaxNodes;
+	int _numMaxNodes;
 
 	//! ClusterNode object of the current node
 	ClusterNode * _thisNode;
@@ -275,7 +275,7 @@ public:
 	{
 		assert(_singleton != nullptr);
 		assert(!_singleton->_clusterNodes.empty());
-		assert(_singleton->_numMaxNodes != std::numeric_limits<size_t>::max());
+		assert(_singleton->_numMaxNodes != -1);
 		return _singleton->_numMaxNodes;
 	}
 

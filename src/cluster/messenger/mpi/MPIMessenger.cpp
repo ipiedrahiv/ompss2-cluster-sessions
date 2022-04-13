@@ -698,7 +698,6 @@ void MPIMessenger::summarizeSplit() const
 int MPIMessenger::nanos6Spawn(int delta, std::string hostname)
 {
 	assert(delta > 0);
-	MPI_Comm newintra = MPI_COMM_NULL;               // Variable for intracomm
 	MPI_Comm newinter = MPI_COMM_NULL;               // Temporal intercomm
 
 	MPI_Info info;
@@ -712,18 +711,17 @@ int MPIMessenger::nanos6Spawn(int delta, std::string hostname)
 	FatalErrorHandler::failIf(errcode != MPI_SUCCESS, "New process returned error code: ", errcode);
 
 	MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
-	MPI_Intercomm_merge(newinter, false, &newintra); // Create new intra
+	MPI_Intercomm_merge(newinter, false, &INTRA_COMM); // Create new intra
+	MPIErrorHandler::handle(ret, INTRA_COMM);
 
-	INTRA_COMM = newintra;                           // Reassign the intra to the new one
 	MPI_Comm_free(&newinter);                        // Free the created intercomm
-
 	MPI_Info_free(&info);
 
 	//! make sure the new communicator returns errors
 	if (_mpi_comm_data_raw) {
 		MPI_Comm_free(&INTRA_COMM_DATA_RAW);
 		ret = MPI_Comm_dup(INTRA_COMM, &INTRA_COMM_DATA_RAW);
-		MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
+		MPIErrorHandler::handle(ret, INTRA_COMM);
 	} else {
 		INTRA_COMM_DATA_RAW = INTRA_COMM;
 	}
