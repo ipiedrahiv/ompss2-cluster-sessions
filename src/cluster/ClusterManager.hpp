@@ -48,7 +48,7 @@ private:
 
 	//! Malleability variables
 	std::vector<std::string> _hostnames;
-	int _numMaxNodes;
+	int _numMinNodes, _numMaxNodes;
 
 	//! ClusterNode object of the current node
 	ClusterNode * _thisNode;

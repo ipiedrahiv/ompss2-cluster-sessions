@@ -32,7 +32,7 @@
 #include "executors/threads/WorkerThread.hpp"
 
 #if HAVE_SLURM
-#include "SlurmAPI.h"
+#include "SlurmAPI.hpp"
 #endif // HAVE_SLURM
 
 TaskOffloading::RemoteTasksInfoMap *TaskOffloading::RemoteTasksInfoMap::_singleton = nullptr;
@@ -51,7 +51,7 @@ std::atomic<bool> ClusterServicesTask::_pausedServices(false);
 
 ClusterManager::ClusterManager()
 	: _clusterRequested(false),
-	_clusterNodes(1), _hostnames(), _numMaxNodes(-1),
+	_clusterNodes(1), _hostnames(), _numMinNodes(-1), _numMaxNodes(-1),
 	_thisNode(new ClusterNode(0, 0, 0, false, 0)),
 	_masterNode(_thisNode),
 	_msn(nullptr),
@@ -66,7 +66,7 @@ ClusterManager::ClusterManager()
 }
 
 ClusterManager::ClusterManager(std::string const &commType, int argc, char **argv)
-	: _clusterRequested(true), _hostnames(), _numMaxNodes(-1),
+	: _clusterRequested(true), _hostnames(), _numMinNodes(-1), _numMaxNodes(-1),
 	_msn(GenericFactory<std::string,Messenger*,int,char**>::getInstance().create(commType, argc, argv)),
 	_disableRemote(false), _disableRemoteConnect(false), _disableAutowait(false),
 	_dataInit(nullptr)
@@ -138,9 +138,6 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 
 	ConfigVariable<int> numMessageHandlerWorkers("cluster.num_message_handler_workers");
 	_numMessageHandlerWorkers = numMessageHandlerWorkers.getValue();
-
-	ConfigVariable<int> numMaxNodes("cluster.num_max_nodes");
-	_numMaxNodes = numMaxNodes.getValue();
 }
 
 ClusterManager::~ClusterManager()
@@ -185,10 +182,20 @@ void ClusterManager::initialize(int argc, char **argv)
 		assert(argc > 0);
 		assert(argv != nullptr);
 		_singleton = new ClusterManager(commType.getValue(), argc, argv);
+		assert(_singleton != nullptr);
 
 #if HAVE_SLURM
+		ConfigVariable<int> numMaxNodes("cluster.num_max_nodes");
+		_singleton->_numMaxNodes = numMaxNodes.getValue();
+
 		if (clusterMalleableMaxSize() != 0 && isMasterNode()) {
+			assert(_singleton->_msn->isSpawned() == false); // Master node can't be spawned
+
 			_singleton->_hostnames = clusterHostManager::getNodeList();
+
+			FatalErrorHandler::failIf(
+				_singleton->_hostnames.empty(),
+				"Hostnames list is empty. Check the SlurmAPI.");
 
 			FatalErrorHandler::warnIf(
 				_singleton->_hostnames.size() > (size_t)clusterMalleableMaxSize(),
@@ -197,6 +204,8 @@ void ClusterManager::initialize(int argc, char **argv)
 #endif // HAVE_SLURM
 
 		if (_singleton->_msn->isSpawned()) {
+			// We could use an if-else but this way it is more defensive to detect errors in other places.
+			assert(!isMasterNode());
 			ClusterManager::synchronizeAll();
 
 			_singleton->_dataInit = (DataInitSpawn *) malloc(sizeof(DataInitSpawn));
@@ -208,9 +217,8 @@ void ClusterManager::initialize(int argc, char **argv)
 
 	} else {
 		_singleton = new ClusterManager();
+		assert(_singleton != nullptr);
 	}
-
-	assert(_singleton != nullptr);
 }
 
 // This needs to be called AFTER initializing the memory allocator
@@ -393,10 +401,10 @@ int ClusterManager::nanos6Spawn(const MessageResize *msg_spawn)
 
 	ClusterManager::synchronizeAll();
 
-	if (oldSize == 1) {
+	if (oldSize == 1) { // When we started with a single node polling services didn't start.
 		ClusterServicesPolling::initialize();
 		ClusterServicesTask::initializeWorkers(_singleton->_numMessageHandlerWorkers);
-	} else {
+	} else {            // Restart the polling services
 		assert(oldSize > 1);
 		ClusterServicesPolling::setPauseStatus(false);
 		ClusterServicesTask::setPauseStatus(false);
@@ -439,7 +447,8 @@ int ClusterManager::nanos6Resize(int delta)
 
 		ClusterManager::sendMessageToAll(&msg_spawn, true);
 
-		// this is the same call that message handler does.
+		// this is the same call that message handler does. So any improvement in resize will be
+		// done in nanos6Spawn not here because that will be executed by all the processes.
 		const int newSize = ClusterManager::nanos6Spawn(&msg_spawn);
 		assert((size_t)newSize == oldSize + delta);
 
@@ -456,6 +465,8 @@ int ClusterManager::nanos6Resize(int delta)
 		}
 
 		return newSize;
+	} else if (delta < 0) {
+		assert(oldSize < (size_t)_singleton->_numMinNodes);
 	}
 
 	return -1;

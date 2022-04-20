@@ -1402,11 +1402,15 @@ noinst_HEADERS += \
 	src/scheduling/schedulers/cluster/ClusterBalanceScheduler.hpp \
 	src/scheduling/schedulers/cluster/ClusterRandomScheduler.hpp
 
+if HAVE_SLURM
+noinst_HEADERS += src/cluster/SlurmAPI.hpp
+endif # HAVE_SLURM
+
 memory_default_sources = $(memory_allocator_default_sources) $(vmm_cluster_sources)
 memory_default_cppflags = $(memory_allocator_default_cppflags) $(vmm_cluster_cppflags)
 memory_debug_sources = $(memory_default_sources)
 memory_debug_cppflags = $(memory_default_cppflags)
-else
+else # USE_CLUSTER
 noinst_HEADERS += \
 	src/cluster/null/ClusterManager.hpp \
 	src/cluster/null/NodeNamespace.hpp \
@@ -1420,7 +1424,7 @@ memory_default_sources = $(memory_allocator_debug_sources) $(vmm_smp_sources)
 memory_default_cppflags = $(memory_allocator_debug_cppflags) $(vmm_smp_cppflags)
 memory_debug_sources = $(memory_allocator_debug_sources) $(vmm_smp_sources)
 memory_debug_cppflags = $(memory_allocator_debug_cppflags) $(vmm_smp_cppflags)
-endif
+endif # USE_CLUSTER
 
 # DLB + Cluster: Hybrid
 if HAVE_DLB
