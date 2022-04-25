@@ -26,13 +26,14 @@ private:
 	bool _mpi_comm_data_raw = 0;
 
 	// Default value useful for asserts
-	int _wrank = -1;   // Rank inside this apprank
-	int _wsize = -1;   // Size of this apprank
-	MPI_Comm INTRA_COMM, INTRA_COMM_DATA_RAW, PARENT_COMM;
+	int _wrank = -1, _wsize = -1;
+	MPI_Comm INTRA_COMM = MPI_COMM_NULL;
+	MPI_Comm INTRA_COMM_DATA_RAW = MPI_COMM_NULL;
+	MPI_Comm PARENT_COMM = MPI_COMM_NULL;
 
-	// Upper bound MPI tag supported by current implementation,
-	// used for masking MPI tags to prevent out-of-range MPI
-	// tags when sending/receiving large number of messages.
+
+	// Upper bound MPI tag supported by current implementation, used for masking MPI tags to prevent
+	// out-of-range MPI tags when sending/receiving large number of messages.
 	int _mpi_ub_tag = 0;
 
 	// This is required as we use intensively multi-threading. See the MPI_Abort user manual about
@@ -174,7 +175,7 @@ public:
 
 	Message *checkMail() override;
 
-	int nanos6Spawn(int delta, std::string hostname) override;
+	int messengerSpawn(int delta, std::string hostname) override;
 
 	inline void testCompletion(std::vector<Message *> &pending) override
 	{
@@ -311,11 +312,8 @@ public:
 };
 
 //! Register MPIMessenger with the object factory
-namespace
-{
-	const bool __attribute__((unused))_registered_MPI_msn =
-		Messenger::RegisterMSNClass<MPIMessenger>("mpi-2sided");
-}
+const bool __attribute__((unused))_registered_MPI_msn =
+	Messenger::RegisterMSNClass<MPIMessenger>("mpi-2sided");
 
 
 template <typename T> size_t MPIMessenger::RequestContainer<T>::maxCount = 0;

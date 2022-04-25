@@ -475,16 +475,9 @@ public:
 
 	static size_t getMPIFragments(DataAccessRegion const &remoteRegion)
 	{
-		const size_t totalSize = remoteRegion.getSize();
-		assert(totalSize > 0);
-
-		const size_t maxRegionSize = _singleton->_msn->getMessageMaxSize();
-		// Note: this calculation still works when maxRegionSize == SIZE_MAX.
-		size_t nFragments = totalSize / maxRegionSize;
-		if ((totalSize % maxRegionSize) != 0) {
-			nFragments++;
-		}
-		return nFragments;
+		assert(_singleton != nullptr);
+		assert(_singleton->_msn != nullptr);
+		return _singleton->_msn->getMessageFragments(remoteRegion);
 	}
 
 	static bool getEagerWeakFetch()

@@ -382,7 +382,7 @@ int ClusterManager::nanos6Spawn(const MessageResize *msg_spawn)
 		ClusterServicesPolling::setPauseStatus(true);
 	}
 	// messenger calls spawn and merge
-	const int newSize = _singleton->_msn->nanos6Spawn(delta, hostname);
+	const int newSize = _singleton->_msn->messengerSpawn(delta, hostname);
 	assert(newSize == oldSize + delta);
 	const int newIndex = _singleton->_msn->getNodeIndex();
 	assert(newIndex == oldIndex);

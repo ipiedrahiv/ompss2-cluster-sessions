@@ -39,7 +39,7 @@ void MPIMessenger::forEachDataPart(
 	int ofs = 0;
 
 #ifndef NDEBUG
-	const int nFragments = ClusterManager::getMPIFragments(DataAccessRegion(startAddress, size));
+	const int nFragments = this->getMessageFragments(DataAccessRegion(startAddress, size));
 #endif
 
 	while (currAddress < endAddress) {
@@ -695,7 +695,7 @@ void MPIMessenger::summarizeSplit() const
 }
 
 
-int MPIMessenger::nanos6Spawn(int delta, std::string hostname)
+int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 {
 	assert(delta > 0);
 	MPI_Comm newinter = MPI_COMM_NULL;               // Temporal intercomm

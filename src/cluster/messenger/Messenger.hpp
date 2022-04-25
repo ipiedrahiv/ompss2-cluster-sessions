@@ -140,15 +140,19 @@ public:
 
 	virtual bool isSpawned() const = 0;
 
-	//! Get the max message size
-	size_t getMessageMaxSize() const
+	size_t getMessageFragments(DataAccessRegion const &remoteRegion) const
 	{
 		assert(_messageMaxSize > 0);
-		return _messageMaxSize;
-	}
+
+		const size_t totalSize = remoteRegion.getSize();
+		assert(totalSize > 0);
+
+		// Note: this calculation still works when maxRegionSize == SIZE_MAX.
+		return totalSize / _messageMaxSize + (bool) (totalSize % _messageMaxSize);
+	};
 
 	//! Spawn new processes.
-	virtual int nanos6Spawn(int delta, std::string hostname) = 0;
+	virtual int messengerSpawn(int delta, std::string hostname) = 0;
 
 	//! \brief Test if sending Messages has completed
 	//!
