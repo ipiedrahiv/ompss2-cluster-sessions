@@ -25,7 +25,8 @@ class ClusterScheduler {
 public:
 	static SchedulerInterface *generate(const std::string &name)
 	{
-		if (ClusterManager::inClusterMode() || ClusterManager::clusterMalleableMaxSize() > 0) {
+		if (ClusterManager::inClusterMode()
+			|| ClusterManager::getInitData().clusterMalleabilityEnabled()) {
 
 			if (name == "random") {
 				return new ClusterSchedulerInterface(nanos6_cluster_random);

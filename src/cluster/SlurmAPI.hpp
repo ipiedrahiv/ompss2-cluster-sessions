@@ -16,9 +16,6 @@ class clusterHostManager {
 public:
 	static std::vector<std::string> getNodeList()
 	{
-		// Only master should call this. Is not enforced, but current design assumes that.
-		assert(ClusterManager::isMasterNode());
-
 		std::vector<std::string> hostname_list;
 		char *hostnames = getenv("SLURM_JOB_NODELIST");
 		if (hostnames == NULL) {

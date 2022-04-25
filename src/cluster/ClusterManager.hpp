@@ -48,22 +48,22 @@ private:
 
 	//! Malleability variables
 	std::vector<std::string> _hostnames;
-	int _numMinNodes, _numMaxNodes;
+	struct DataInitSpawn _dataInit;
 
 	//! ClusterNode object of the current node
-	ClusterNode * _thisNode;
+	ClusterNode * _thisNode = nullptr;
 
 	//! ClusterNode of the master node
-	ClusterNode * _masterNode;
+	ClusterNode * _masterNode = nullptr;
 
 	//! Messenger object for cluster communication.
-	Messenger * _msn;
+	Messenger * _msn = nullptr;
 
 	//! Using cluster namespace
-	bool _disableRemote;
-	bool _disableRemoteConnect;
+	bool _disableRemote = false;
+	bool _disableRemoteConnect = false;
 
-	bool _disableAutowait;
+	bool _disableAutowait = false;
 
 	bool _eagerWeakFetch;
 
@@ -76,8 +76,6 @@ private:
 	bool _autoOptimizeReadOnly;
 
 	int _numMessageHandlerWorkers;
-
-	struct DataInitSpawn *_dataInit;
 
 	//! private constructors. This is a singleton.
 	ClusterManager();
@@ -92,6 +90,7 @@ public:
 	//! \param[in] Number of desired new nodes
 	//! \returns On success returns delta.
 	static int nanos6Spawn(const MessageResize *msg_spawn);
+	static int nanos6Shrink(const MessageResize *msg_shrink);
 
 	//! \brief Initialize the ClusterManager
 	//! This is called before initializing the memory allocator because it collects some
@@ -201,15 +200,9 @@ public:
 
 
 	//! \brief Returns the init data received during the initialization.
-	static inline DataInitSpawn *getInitData()
+	static inline DataInitSpawn &getInitData()
 	{
 		assert(_singleton != nullptr);
-		assert(_singleton->_msn != nullptr);
-#ifndef NDEBUG
-		if (_singleton->_msn->isSpawned()) {
-			assert(_singleton->_dataInit != nullptr);
-		}
-#endif
 		return _singleton->_dataInit;
 	}
 
@@ -235,7 +228,9 @@ public:
 		assert(_singleton != nullptr);
 		assert(!_singleton->_clusterNodes.empty());
 #ifndef NDEBUG
-		if (_singleton->_clusterNodes.size() > 0) {
+		if (_singleton->_clusterNodes.size() > 1) {
+			assert(_singleton->_msn != nullptr);
+		} else if (_singleton->_dataInit.clusterMalleabilityEnabled()) {
 			assert(_singleton->_msn != nullptr);
 		}
 #endif
@@ -271,14 +266,6 @@ public:
 		return _singleton->_clusterRequested;
 	}
 
-	static inline int clusterMalleableMaxSize()
-	{
-		assert(_singleton != nullptr);
-		assert(!_singleton->_clusterNodes.empty());
-		assert(_singleton->_numMaxNodes != -1);
-		return _singleton->_numMaxNodes;
-	}
-
 	//! \brief Check for incoming messages
 	//!
 	//! This is just a wrapper on top of the Messenger API
@@ -298,8 +285,7 @@ public:
 	//!
 	//! \param[in] msg is the Message to send
 	//! \param[in] recipient is the remote node to send the Message
-	//! \param[in] if block is true the the call will block until the
-	//!		Message is sent
+	//! \param[in] if block is true the the call will block until the Message is sent
 	static inline void sendMessage(Message *msg, ClusterNode const *recipient, bool block = false)
 	{
 		assert(_singleton != nullptr);
@@ -410,6 +396,13 @@ public:
 
 		ClusterNode const *remoteNode = getClusterNode(to->getIndex());
 		return _singleton->_msn->sendData(region, remoteNode, messageId, block, instrument);
+	}
+
+	static inline bool isSpawned()
+	{
+		assert(_singleton != nullptr);
+		assert(_singleton->_msn != nullptr);
+		return _singleton->_msn->isSpawned();
 	}
 
 	//! \brief Initiate a data fetch operation

@@ -29,7 +29,7 @@ VirtualMemoryManagement *VirtualMemoryManagement::_singleton = nullptr;
 //! process.
 //!
 //! \returns a vector of DataAccessRegion objects describing the mappings
-static std::vector<DataAccessRegion> findMappedRegions(size_t ngaps)
+std::vector<DataAccessRegion> VirtualMemoryManagement::findMappedRegions(size_t ngaps)
 {
 	std::vector<DataAccessRegion> maps;
 
@@ -86,9 +86,9 @@ static std::vector<DataAccessRegion> findMappedRegions(size_t ngaps)
 //!
 //! \returns an available memory region to map Nanos6 memory, or an empty region
 //!          if none available
-static DataAccessRegion findSuitableMemoryRegion()
+DataAccessRegion VirtualMemoryManagement::findSuitableMemoryRegion()
 {
-	std::vector<DataAccessRegion> maps = findMappedRegions(2);
+	std::vector<DataAccessRegion> maps = VirtualMemoryManagement::findMappedRegions(2);
 	const size_t length = maps.size();
 	DataAccessRegion gap;
 
@@ -108,7 +108,8 @@ static DataAccessRegion findSuitableMemoryRegion()
 	}
 
 	// If not in cluster mode and malleability is disabled, we are done here
-	if (!ClusterManager::inClusterMode() && ClusterManager::clusterMalleableMaxSize() == 0) {
+	if (!ClusterManager::inClusterMode()
+		&& ClusterManager::getInitData().clusterMalleabilityEnabled() == false) {
 		return gap;
 	}
 
@@ -157,95 +158,90 @@ static DataAccessRegion findSuitableMemoryRegion()
 	return gap;
 }
 
-static bool checkIsUsableMemoryRegion(const DataAccessRegion &region)
+
+const DataInitSpawn &VirtualMemoryManagement::setupInitData()
 {
-	std::vector<DataAccessRegion> maps = findMappedRegions(1);
-	const size_t length = maps.size();
-
-	// Find the biggest gap locally
-	for (size_t i = 1; i < length; ++i) {
-		void *previousEnd = maps[i - 1].getEndAddress();
-		void *nextStart = maps[i].getStartAddress();
-
-		if (previousEnd >= nextStart                    // This should never happen
-			|| previousEnd > region.getEndAddress()) {  // Too early range
-			continue;
-		}
-
-		DataAccessRegion gapRegion(previousEnd, nextStart);
-
-		if (region.fullyContainedIn(gapRegion)) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-VirtualMemoryManagement::VirtualMemoryManagement()
-	: _startAddress(nullptr), _distribAddress(nullptr),
-	  _distribSize(0), _localSizePerNode(0), _totalVirtualMemory(0)
-{
-	// The cluster.distributed_memory variable determines the total address space to be
-	// used for distributed allocations across the cluster The efault value is 2GB
-	ConfigVariable<StringifiedMemorySize> distribSizeEnv("cluster.distributed_memory");
-	_distribSize = distribSizeEnv.getValue();
-	assert(_distribSize > 0);
-	_distribSize = ROUND_UP(_distribSize, HardwareInfo::getPageSize());
-
-	// The cluster.local_memory variable determines the size of the local address space
-	// per cluster node. The default value is the minimum between 2GB and the 5% of the
-	// total physical memory of the machine
-	ConfigVariable<StringifiedMemorySize> localSizeEnv("cluster.local_memory");
-	_localSizePerNode = localSizeEnv.getValue();
-	if (_localSizePerNode == 0) {
-		FatalErrorHandler::warn("cluster.local_memory not from toml.");
-		_localSizePerNode = std::min(2UL << 30, HardwareInfo::getPhysicalMemorySize() / 20);
-	}
-	assert(_localSizePerNode > 0);
-	_localSizePerNode = ROUND_UP(_localSizePerNode, HardwareInfo::getPageSize());
+	// This function is called BEFORE the constructor. It actually may be in the ClusterManager, But
+	// I implemented it here because it handles memory stuff.
+	assert(_singleton == nullptr);
 
 	// Get the maximum size, when zero malleability is disabled, when numeric limit something is
 	// wrong. If malleability is disabled then use the current cluster size.
-	int maxSize = ClusterManager::clusterMalleableMaxSize();
-	if (maxSize == 0) {
-		maxSize = ClusterManager::clusterSize();
-	}
+	DataInitSpawn &initData = ClusterManager::getInitData();
 
-	_totalVirtualMemory = _distribSize + _localSizePerNode * maxSize;
+	if (initData._virtualAllocation.empty()) {
+		assert(initData._virtualDistributedRegion.empty());
 
-	const DataInitSpawn *initData = ClusterManager::getInitData();
+		// The cluster.local_memory variable determines the size of the local address space
+		// per cluster node. The default value is the minimum between 2GB and the 5% of the
+		// total physical memory of the machine
+		ConfigVariable<StringifiedMemorySize> localSizeEnv("cluster.local_memory");
+		size_t localSizePerNode = localSizeEnv.getValue();
+		if (localSizePerNode == 0) {
+			FatalErrorHandler::warn("cluster.local_memory not from toml.");
+			localSizePerNode = std::min(2UL << 30, HardwareInfo::getPhysicalMemorySize() / 20);
+		}
+		FatalErrorHandler::failIf(localSizePerNode <= 0, "cluster.local_memory is zero.");
+		localSizePerNode = ROUND_UP(localSizePerNode, HardwareInfo::getPageSize());
 
-	if (initData != nullptr) {
-		const DataAccessRegion &gap = initData->_virtualRegion;
-		_startAddress = gap.getStartAddress();
-		// TODO: This is a paranoic assertion until I solve the issue with multiple spawn regions.
-		assert(_totalVirtualMemory == gap.getSize());
+		// The cluster.distributed_memory variable determines the total address space to be
+		// used for distributed allocations across the cluster The efault value is 2GB
+		ConfigVariable<StringifiedMemorySize> distribSizeEnv("cluster.distributed_memory");
+		FatalErrorHandler::failIf(distribSizeEnv.getValue() <= 0, "cluster.distributed_memory is zero.");
+		const size_t distribSize = ROUND_UP(distribSizeEnv.getValue(), HardwareInfo::getPageSize());
 
-		FatalErrorHandler::failIf(checkIsUsableMemoryRegion(gap) == false,
-			"Virtual memory gap in new spawned process is not available.");
-	} else {
+		const size_t totalVirtualMemory = distribSize + localSizePerNode * initData._numMaxNodes;
+
+		assert(!ClusterManager::isSpawned());
 		ConfigVariable<uint64_t> confStartAddress("cluster.va_start");
-		_startAddress = (void *) confStartAddress.getValue();
+		void *startAddress = (void *) confStartAddress.getValue();
 
 		// If the start address was not specified then coordinate with other processes.
-		if (_startAddress == nullptr) {
-			DataAccessRegion gap = findSuitableMemoryRegion();
-			_startAddress = gap.getStartAddress();
-			FatalErrorHandler::failIf(gap.getSize() < _totalVirtualMemory,
-				"Cannot allocate virtual memory region");
+		if (startAddress == nullptr) {
+			DataAccessRegion totalGap = VirtualMemoryManagement::findSuitableMemoryRegion();
+
+			FatalErrorHandler::failIf(totalGap.getSize() < totalVirtualMemory,
+				"Cannot allocate virtual memory region with size: ", totalVirtualMemory);
+
+			startAddress = totalGap.getStartAddress();
 		}
+
+		initData._virtualAllocation = DataAccessRegion(startAddress, totalVirtualMemory);
+
+		void* distribStart
+			= (char *)initData._virtualAllocation.getStartAddress()
+			+ localSizePerNode * initData._numMaxNodes;
+
+		initData._virtualDistributedRegion = DataAccessRegion(distribStart, distribSize);
+
+		initData._localSizePerNode = localSizePerNode;
 	}
-	assert(_startAddress != nullptr);
 
-	assert(_allocations.empty());
-	_allocations.push_back(new VirtualMemoryAllocation(_startAddress, _totalVirtualMemory));
+	return initData;
+}
 
-	_distribAddress = (char *)_startAddress + _localSizePerNode * maxSize;
+VirtualMemoryManagement::VirtualMemoryManagement(const DataInitSpawn &initData)
+	: _allocation(new VirtualMemoryAllocation(initData._virtualAllocation)),
+	  _distributedVirtualRegion(new VirtualMemoryArea(initData._virtualDistributedRegion)),
+	  _localSizePerNode(initData._localSizePerNode)
+{
+	assert(!initData._virtualAllocation.empty());
+	assert(!initData._virtualDistributedRegion.empty());
+	assert(initData._localSizePerNode > 0);
+	assert(_allocation != nullptr);
+	assert(_distributedVirtualRegion != nullptr);
 
-	RuntimeInfo::addEntry("distributed_memory_size", "Size of distributed memory", _distribSize);
+	FatalErrorHandler::failIf(_allocation->fullyContainsRegion(*_distributedVirtualRegion) == false,
+		"Distributed virtual region: ", _distributedVirtualRegion,
+		" not fully contained in allocated virtual region: ", std::ref(*_allocation));
+
+	RuntimeInfo::addEntry(
+		"va_start", "Virtual address space start",
+		(unsigned long)_allocation->getStartAddress()
+	);
+	RuntimeInfo::addEntry("distributed_memory_size", "Size of distributed memory",
+		_allocation->getSize());
 	RuntimeInfo::addEntry("local_memorysize", "Size of local memory per node", _localSizePerNode);
-	RuntimeInfo::addEntry("va_start", "Virtual address space start", (unsigned long)_startAddress);
 }
 
 
@@ -254,24 +250,18 @@ VirtualMemoryManagement::~VirtualMemoryManagement()
 	for (auto &vma : _localNUMAVMA) {
 		delete vma;
 	}
-	delete _genericVMA;
-
-	for (auto &alloc : _allocations) {
-		delete alloc;
-	}
+	delete _distributedVirtualRegion;
+	delete _allocation;
 
 	_localNUMAVMA.clear();
-	_allocations.clear();
 }
 
 
 void VirtualMemoryManagement::setupMemoryLayout()
 {
-	assert(_startAddress != nullptr);
-	assert(_localSizePerNode > 0);
-	assert(_distribAddress != nullptr);
-	assert(_distribSize > 0);
-	assert(_totalVirtualMemory > _distribSize);
+	assert(!_allocation->empty());
+	assert(!_distributedVirtualRegion->empty());
+	assert(_allocation->getSize() > _distributedVirtualRegion->getSize());
 
 	// Register local addresses with the Directory
 	for (const ClusterNode *node : ClusterManager::getClusterNodes()) {
@@ -300,8 +290,10 @@ void VirtualMemoryManagement::setupMemoryLayout()
 		assert(sizePerNUMA > 0);
 
 		size_t extraPages = localPages % numaNodeCount;
-		char *ptr = (char *)_startAddress + _localSizePerNode * node->getIndex();
-		assert(ptr + _localSizePerNode <= _distribAddress);
+		char *ptr = (char *)_allocation->getStartAddress() + _localSizePerNode * node->getIndex();
+
+		assert(ptr <= _distributedVirtualRegion->getStartAddress());
+		assert(ptr + _localSizePerNode <= _distributedVirtualRegion->getStartAddress());
 
 		for (size_t i = 0; i < numaNodeCount; ++i) {
 			size_t numaSize = sizePerNUMA;
@@ -318,6 +310,4 @@ void VirtualMemoryManagement::setupMemoryLayout()
 			ptr += numaSize;
 		}
 	}
-
-	_genericVMA = new VirtualMemoryArea(_distribAddress, _distribSize);
 }

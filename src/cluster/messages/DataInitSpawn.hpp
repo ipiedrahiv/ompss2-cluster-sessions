@@ -12,14 +12,21 @@
 
 struct DataInitSpawn {
 
-	DataAccessRegion _virtualRegion;
+	DataAccessRegion _virtualAllocation;
+	DataAccessRegion _virtualDistributedRegion;
+	size_t _localSizePerNode;
+	size_t _numMinNodes, _numMaxNodes;
 
 	DataInitSpawn()
+		: _virtualAllocation(), _virtualDistributedRegion(), _numMinNodes(0), _numMaxNodes(0)
 	{
-		VirtualMemoryManagement::VirtualMemoryAllocation *allocation
-			= VirtualMemoryManagement::getAllocations()[0];
+	}
 
-		_virtualRegion = DataAccessRegion(allocation->getStartAddress(), allocation->getSize());
+	inline bool clusterMalleabilityEnabled() const
+	{
+		assert(_numMinNodes != 0);
+		assert(_numMaxNodes != 0);
+		return _numMinNodes != _numMaxNodes;
 	}
 
 };

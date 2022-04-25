@@ -32,7 +32,8 @@ void DefaultCPUManager::preinitialize()
 	// been handled.  Therefore, in cluster mode or malleable executions, leave one CPU free to be
 	// used by the LeaderThread.
 	_reserveCPUforLeaderThread
-		= (ClusterManager::inClusterMode() || ClusterManager::clusterMalleableMaxSize() != 0);
+		= (ClusterManager::inClusterMode()
+			|| ClusterManager::getInitData().clusterMalleabilityEnabled());
 
 	// Retreive the CPU mask of this process
 	int rc = sched_getaffinity(0, sizeof(cpu_set_t), &_cpuMask);

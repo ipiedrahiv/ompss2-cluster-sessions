@@ -30,7 +30,13 @@ public:
 		_nextFree((char *)address), _available(size), _count_allocs(0)
 	{
 		assert(_available > 0);
-		assert(size > 0);
+		assert(this->getStartAddress() != nullptr);
+		assert(this->getSize() > 0);
+	}
+
+	VirtualMemoryArea(const DataAccessRegion &region)
+		: VirtualMemoryArea(region.getStartAddress(), region.getSize())
+	{
 	}
 
 	//! Virtual addresses should be unique.
