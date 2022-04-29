@@ -139,6 +139,19 @@ public:
 		Directory::insert(tmpRegion, node->getMemoryNode());
 	}
 
+	static void unregisterNodeLocalRegion(const ClusterNode *node)
+	{
+		assert(_singleton != nullptr);
+		// TODO: add some assertion here to check the region is nor already registered.
+		char *ptr = ((char *)_singleton->_allocation->getStartAddress()
+			+ _singleton->_localSizePerNode * node->getIndex());
+
+		DataAccessRegion tmpRegion((void *)ptr, _singleton->_localSizePerNode);
+		assert(tmpRegion.getEndAddress() <= _singleton->_distributedVirtualRegion->getStartAddress());
+
+		Directory::erase(tmpRegion);
+	}
+
 	/** allocate a block of generic addresses.
 	 *
 	 * This region is meant to be used for allocations that can be mapped

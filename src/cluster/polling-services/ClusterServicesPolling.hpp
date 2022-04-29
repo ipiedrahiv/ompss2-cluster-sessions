@@ -85,22 +85,21 @@ public:
 	inline static void setPauseStatus(bool pause)
 	{
 		_pausedServices.store(pause);
-
-		if (pause == true) {
-			waitUntilFinished();
-		}
 	}
 
 	//! \brief Shutdown the Cluster polling services-
 	//!
-	//! This method will be called during ClusterManager
-	//! shutdown.
+	//! This method will be called during ClusterManager shutdown.
 	//! New type of polling services need to expose a
 	//! shutdown interface that will be called from here.
 	inline static void shutdown(bool hybridOnly = false)
 	{
+		assert(ClusterManager::inClusterMode()
+			|| ClusterManager::getInitData().clusterMalleabilityEnabled());
 		assert(MemoryAllocator::isInitialized());
 		assert(_activeClusterPollingServices.load() > 0);
+
+		setPauseStatus(false);
 
 		if (!hybridOnly) {
 			// Occasionally a slave node receives the MessageSysFinish and starts

@@ -256,9 +256,10 @@ void ClusterManager::shutdownPhase1()
 {
 	assert(NodeNamespace::isEnabled() || ClusterManager::getMessenger() == nullptr);
 	assert(_singleton != nullptr);
+	assert(NodeNamespace::isEnabled());
 	assert(MemoryAllocator::isInitialized());
 
-	if (inClusterMode()) {
+	if (ClusterManager::inClusterMode()) {
 		ClusterServicesPolling::waitUntilFinished();
 	}
 
@@ -401,10 +402,64 @@ int ClusterManager::nanos6Spawn(const MessageResize *msg_spawn)
 	return newSize;
 }
 
+int ClusterManager::nanos6Shrink(const MessageResize *msg_shrink)
+{
+	assert(_singleton != nullptr);
+	assert(_singleton->_msn != nullptr);
+
+	const int delta = msg_shrink->getDelta();
+	assert(delta < 0);
+	const std::string hostname = msg_shrink->getHostname();
+	assert(hostname.empty());
+
+	const __attribute__((unused)) int oldIndex = _singleton->_msn->getNodeIndex();
+	const int oldSize = ClusterManager::clusterSize();
+
+	ClusterServicesTask::setPauseStatus(true);
+	ClusterServicesPolling::setPauseStatus(true);
+
+	// messenger calls spawn and merge
+	const int newSize = _singleton->_msn->messengerShrink(delta);
+
+	if (newSize > 0) {
+		assert(newSize == oldSize + delta);
+		const int newIndex = _singleton->_msn->getNodeIndex();
+		assert(newIndex == oldIndex);
+
+		// Surviving nodes
+		for (int i = oldSize - 1; i >= newSize; --i) {
+			ClusterNode *node = _singleton->_clusterNodes[i];
+			VirtualMemoryManagement::unregisterNodeLocalRegion(node);
+			delete node;
+		}
+		_singleton->_clusterNodes.resize(newSize);
+
+		MessageId::reset(newIndex, newSize);
+		WriteIDManager::reset(newIndex, newSize);
+		OffloadedTaskIdManager::reset(newIndex, newSize);
+
+		ClusterManager::synchronizeAll();
+
+		if (newSize == 1) { // When we started with a single node polling services didn't start.
+			ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
+			ClusterServicesPolling::shutdown();
+		} else {            // Restart the polling services
+			assert(newSize > 1);
+			ClusterServicesPolling::setPauseStatus(false);
+			ClusterServicesTask::setPauseStatus(false);
+		}
+
+	} else {
+		MessageSysFinish sysFinish;
+		sysFinish.handleMessage();
+	}
+
+	return newSize;
+}
+
 
 int ClusterManager::nanos6Resize(int delta)
 {
-	assert(delta != 0);
 	assert(ClusterManager::isMasterNode());
 	assert(ClusterManager::getInitData().clusterMalleabilityEnabled());
 	// There is more than one host... This will be corrected with multiple processes/node
@@ -412,47 +467,69 @@ int ClusterManager::nanos6Resize(int delta)
 
 	TaskWait::taskWait("nanos6Resize");
 
-	const size_t oldSize = ClusterManager::clusterSize();
-
+	// Just some checks
+	const int oldSize = _singleton->_msn->getClusterSize();
+	assert(ClusterManager::clusterSize() == oldSize);
 	if (delta == 0) {
 		return oldSize;
 	}
 
-	assert(oldSize == (size_t)_singleton->_msn->getClusterSize());
+	const int expectedSize = oldSize + delta;
 
-	FatalErrorHandler::failIf(oldSize < 1, "Old size can't be less than 1");
-	FatalErrorHandler::failIf(_singleton->_dataInit._numMaxNodes == 0,
-		"Can't resize cluster, malleability is disabled (num_max_nodes == 0)");
+	// Some of these conditions may be substituted with assertions
+	FatalErrorHandler::failIf((size_t)oldSize < _singleton->_dataInit._numMinNodes,
+		"Old size can't be less than initial size: ", _singleton->_dataInit._numMinNodes);
+	FatalErrorHandler::failIf((size_t)oldSize > _singleton->_dataInit._numMaxNodes,
+		"Old size can't be bigger than numMaxNodes: ", _singleton->_dataInit._numMaxNodes);
+
+	FatalErrorHandler::failIf(
+		(size_t) oldSize < _singleton->_dataInit._numMinNodes
+		|| (size_t) oldSize > _singleton->_dataInit._numMaxNodes,
+		"Can't resize processes, current nodes: ", oldSize,
+		" but the valid range is: [", _singleton->_dataInit._numMinNodes,
+		";", _singleton->_dataInit._numMaxNodes, "]"
+	);
+
+	if ((size_t)expectedSize > _singleton->_dataInit._numMaxNodes
+		|| (size_t)expectedSize < _singleton->_dataInit._numMinNodes) {
+		FatalErrorHandler::warn(
+			"Can't resize ", delta,
+			" processes, current nodes: ", oldSize,
+			" but the valid range is: [", _singleton->_dataInit._numMinNodes,
+			";", _singleton->_dataInit._numMaxNodes, "]"
+		);
+		return oldSize;
+	}
 
 	if (delta > 0) {
-		assert(oldSize < _singleton->_hostnames.size());
-		assert(oldSize < (size_t)_singleton->_dataInit._numMaxNodes);
+		assert((size_t)oldSize < _singleton->_hostnames.size());
 
 		// Master sends spawn messages to all the OLD world
-		MessageResize msg_spawn(delta, _singleton->_hostnames[oldSize]);
-
-		ClusterManager::sendMessageToAll(&msg_spawn, true);
+		MessageResize msgResize(delta, _singleton->_hostnames[oldSize]);
+		ClusterManager::sendMessageToAll(&msgResize, true);
 
 		// this is the same call that message handler does. So any improvement in resize will be
 		// done in nanos6Spawn not here because that will be executed by all the processes.
-		const int newSize = ClusterManager::nanos6Spawn(&msg_spawn);
-		assert((size_t)newSize == oldSize + delta);
+		const int newSize = ClusterManager::nanos6Spawn(&msgResize);
+		assert(newSize == expectedSize);
 
 		// Then master sends the init message to the new processes.
-		DataAccessRegion msg_region((void *)&_singleton->_dataInit, sizeof(DataInitSpawn));
+		DataAccessRegion init_region((void *)&_singleton->_dataInit, sizeof(DataInitSpawn));
 		for (int i = oldSize; i < newSize; ++i) {
 
 			ClusterNode *target = ClusterManager::getClusterNode(i);
 			assert(target != nullptr);
 			assert(target->getMemoryNode() != nullptr);
 
-			ClusterManager::sendDataRaw(msg_region, target->getMemoryNode(), 1, true);
+			ClusterManager::sendDataRaw(init_region, target->getMemoryNode(), 1, true);
 		}
-
-		return newSize;
 	} else if (delta < 0) {
-		assert(oldSize < (size_t)_singleton->_dataInit._numMinNodes);
+		MessageResize msgResize(delta, "");
+		ClusterManager::sendMessageToAll(&msgResize, true);
+
+		__attribute__((unused)) const int newSize = ClusterManager::nanos6Shrink(&msgResize);
+		assert(newSize == expectedSize || newSize == 0);
 	}
 
-	return -1;
+	return expectedSize;
 }

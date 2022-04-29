@@ -694,29 +694,9 @@ void MPIMessenger::summarizeSplit() const
 	Instrument::summarizeSplit(_externalRank, _physicalNodeNum, _apprankNum);
 }
 
-
-int MPIMessenger::messengerSpawn(int delta, std::string hostname)
+void MPIMessenger::MessengerReinitialize()
 {
-	assert(delta > 0);
-	MPI_Comm newinter = MPI_COMM_NULL;               // Temporal intercomm
-
-	MPI_Info info;
-	MPI_Info_create(&info);
-	MPI_Info_set(info, "host", hostname.c_str());
-
-	int errcode = 0;
-
-	int ret = MPI_Comm_spawn(_argv[0], &_argv[1], delta, info, 0, INTRA_COMM, &newinter, &errcode);
-	MPIErrorHandler::handle(ret, INTRA_COMM);
-	FatalErrorHandler::failIf(errcode != MPI_SUCCESS, "New process returned error code: ", errcode);
-
-	MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
-	MPI_Intercomm_merge(newinter, false, &INTRA_COMM); // Create new intra
-	MPIErrorHandler::handle(ret, INTRA_COMM);
-
-	MPI_Comm_free(&newinter);                        // Free the created intercomm
-	MPI_Info_free(&info);
-
+	int ret;
 	//! make sure the new communicator returns errors
 	if (_mpi_comm_data_raw) {
 		MPI_Comm_free(&INTRA_COMM_DATA_RAW);
@@ -733,8 +713,59 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 
 	ret = MPI_Comm_size(INTRA_COMM, &newsize);
 	MPIErrorHandler::handle(ret, INTRA_COMM);
-	assert(newsize = _wsize + delta);
 	_wsize = newsize;
+}
+
+int MPIMessenger::messengerSpawn(int delta, std::string hostname)
+{
+	assert(delta > 0);
+	// MPI_Comm newinter = MPI_COMM_NULL;               // Temporal intercomm
+
+	MPI_Info info;
+	MPI_Info_create(&info);
+	MPI_Info_set(info, "host", hostname.c_str());
+
+	int errcode = 0;
+
+	int ret = MPI_Comm_spawn(_argv[0], &_argv[1], delta, info, 0, INTRA_COMM, &CHILD_COMM, &errcode);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	FatalErrorHandler::failIf(errcode != MPI_SUCCESS, "New process returned error code: ", errcode);
+
+	MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
+	MPI_Intercomm_merge(CHILD_COMM, false, &INTRA_COMM); // Create new intra
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+
+	MPI_Comm_free(&CHILD_COMM);                        // Free the created intercomm
+	MPI_Info_free(&info);
+
+	MessengerReinitialize();
+	assert(_wsize > delta);
 
 	return _wsize;
+}
+
+int MPIMessenger::messengerShrink(int delta)
+{
+	assert(delta < 0);
+	int newsize = _wsize + delta;
+	assert(newsize >= 1);
+	const int survive = (_wrank < newsize);
+
+	MPI_Comm newintra = MPI_COMM_NULL;
+
+	int ret = MPI_Comm_split(INTRA_COMM, survive, 0, &newintra);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+
+	MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
+	INTRA_COMM = newintra;
+
+	if (survive) {
+		MPI_Comm_disconnect(&CHILD_COMM);
+		MessengerReinitialize();
+		assert(newsize == _wsize);
+		return _wsize;
+	}
+
+	MPI_Comm_disconnect(&PARENT_COMM);
+	return 0;
 }

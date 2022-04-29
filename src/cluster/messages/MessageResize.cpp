@@ -24,7 +24,7 @@ bool MessageResize::handleMessage()
 	if (deltaNodes > 0) {
 		ClusterManager::nanos6Spawn(this);
 	} else {
-		FatalErrorHandler::fail("Negative delta (shrink) not supported yet");
+		ClusterManager::nanos6Shrink(this);
 	}
 
 	return true;

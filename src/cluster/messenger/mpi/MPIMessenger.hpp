@@ -30,7 +30,7 @@ private:
 	MPI_Comm INTRA_COMM = MPI_COMM_NULL;
 	MPI_Comm INTRA_COMM_DATA_RAW = MPI_COMM_NULL;
 	MPI_Comm PARENT_COMM = MPI_COMM_NULL;
-
+	MPI_Comm CHILD_COMM = MPI_COMM_NULL;
 
 	// Upper bound MPI tag supported by current implementation, used for masking MPI tags to prevent
 	// out-of-range MPI tags when sending/receiving large number of messages.
@@ -141,6 +141,8 @@ private:
 	void setApprankNumber(const std::string &clusterSplit, int &internalRank);
 	void shareDLBInfo();
 
+	void MessengerReinitialize();
+
 public:
 
 	MPIMessenger(int argc, char **argv);
@@ -176,6 +178,7 @@ public:
 	Message *checkMail() override;
 
 	int messengerSpawn(int delta, std::string hostname) override;
+	int messengerShrink(int delta) override;
 
 	inline void testCompletion(std::vector<Message *> &pending) override
 	{

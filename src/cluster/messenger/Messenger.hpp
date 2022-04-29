@@ -153,6 +153,7 @@ public:
 
 	//! Spawn new processes.
 	virtual int messengerSpawn(int delta, std::string hostname) = 0;
+	virtual int messengerShrink(int delta) = 0;
 
 	//! \brief Test if sending Messages has completed
 	//!

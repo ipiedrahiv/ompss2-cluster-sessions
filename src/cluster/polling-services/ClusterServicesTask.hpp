@@ -79,6 +79,10 @@ public:
 		for(int i = 0; i < numWorkers; ++i) {
 			unregisterService<ClusterPollingServices::ClusterWorker<Message>>();
 		}
+		// We need to unset the PauseStatus because the task needs to run once to return false and
+		// exit.
+		setPauseStatus(false);
+
 		// To assert shutdown the services before the CPUManager
 		// Wait for cluster polling services before returning
 		while (_activeClusterTaskServices.load() > 0) {}
