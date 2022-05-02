@@ -23,6 +23,11 @@ class DataTransfer;
 class MPIMessenger : public Messenger {
 private:
 
+	struct commInfo {
+		MPI_Comm interComm;
+		int groupSize;
+	};
+
 	bool _mpi_comm_data_raw = 0;
 
 	// Default value useful for asserts
@@ -30,7 +35,8 @@ private:
 	MPI_Comm INTRA_COMM = MPI_COMM_NULL;
 	MPI_Comm INTRA_COMM_DATA_RAW = MPI_COMM_NULL;
 	MPI_Comm PARENT_COMM = MPI_COMM_NULL;
-	MPI_Comm CHILD_COMM = MPI_COMM_NULL;
+
+	std::vector<commInfo> spawnedCommVector;
 
 	// Upper bound MPI tag supported by current implementation, used for masking MPI tags to prevent
 	// out-of-range MPI tags when sending/receiving large number of messages.
@@ -91,7 +97,6 @@ private:
 				status = (MPI_Status *) malloc(maxCount * sizeof(MPI_Status));
 				FatalErrorHandler::failIf(status == nullptr,
 					"Could not allocate memory for status array in testCompletionInternal");
-
 			}
 
 			assert(RequestContainer<T>::requests != nullptr);

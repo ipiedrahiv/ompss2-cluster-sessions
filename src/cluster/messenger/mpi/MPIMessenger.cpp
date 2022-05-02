@@ -719,7 +719,7 @@ void MPIMessenger::MessengerReinitialize()
 int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 {
 	assert(delta > 0);
-	// MPI_Comm newinter = MPI_COMM_NULL;               // Temporal intercomm
+	MPI_Comm newinter = MPI_COMM_NULL;               // Temporal intercomm
 
 	MPI_Info info;
 	MPI_Info_create(&info);
@@ -727,19 +727,24 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 
 	int errcode = 0;
 
-	int ret = MPI_Comm_spawn(_argv[0], &_argv[1], delta, info, 0, INTRA_COMM, &CHILD_COMM, &errcode);
+	int ret = MPI_Comm_spawn(_argv[0], &_argv[1], delta, info, 0, INTRA_COMM, &newinter, &errcode);
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 	FatalErrorHandler::failIf(errcode != MPI_SUCCESS, "New process returned error code: ", errcode);
 
-	MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
-	MPI_Intercomm_merge(CHILD_COMM, false, &INTRA_COMM); // Create new intra
+	ret = MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 
-	MPI_Comm_free(&CHILD_COMM);                        // Free the created intercomm
-	MPI_Info_free(&info);
+	ret = MPI_Intercomm_merge(newinter, false, &INTRA_COMM); // Create new intra
+	MPIErrorHandler::handle(ret, INTRA_COMM);
 
+	spawnedCommVector.push_back({newinter, delta});
+
+	ret = MPI_Info_free(&info);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+
+	__attribute__((unused)) const int oldsize = _wsize;
 	MessengerReinitialize();
-	assert(_wsize > delta);
+	assert(_wsize == oldsize + delta);                       // New size needs to be bigger
 
 	return _wsize;
 }
@@ -756,16 +761,23 @@ int MPIMessenger::messengerShrink(int delta)
 	int ret = MPI_Comm_split(INTRA_COMM, survive, 0, &newintra);
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 
-	MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
+	ret = MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
 	INTRA_COMM = newintra;
+	MPIErrorHandler::handle(ret, INTRA_COMM);
 
 	if (survive) {
-		MPI_Comm_disconnect(&CHILD_COMM);
+		ret = MPI_Comm_disconnect(&spawnedCommVector.back().interComm);
+		MPIErrorHandler::handle(ret, INTRA_COMM);
+		spawnedCommVector.pop_back();
+
 		MessengerReinitialize();
 		assert(newsize == _wsize);
 		return _wsize;
 	}
 
-	MPI_Comm_disconnect(&PARENT_COMM);
+	assert(spawnedCommVector.size() == 0);
+	ret = MPI_Comm_disconnect(&PARENT_COMM);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+
 	return 0;
 }
