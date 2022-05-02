@@ -33,6 +33,7 @@
 
 #if HAVE_SLURM
 #include "SlurmAPI.hpp"
+SlurmAPI *SlurmAPI::_singleton = nullptr;
 #endif // HAVE_SLURM
 
 TaskOffloading::RemoteTasksInfoMap *TaskOffloading::RemoteTasksInfoMap::_singleton = nullptr;
@@ -152,11 +153,8 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 			_dataInit._numMaxNodes = numMaxNodes.getValue();
 		}
 
-		if (_thisNode == _masterNode && _dataInit.clusterMalleabilityEnabled() != 0) {
-			_hostnames = clusterHostManager::getNodeList();
-
-			FatalErrorHandler::failIf(_hostnames.empty(),
-				"Hostnames list is empty. Check the SlurmAPI.");
+		if (_thisNode == _masterNode && _dataInit.clusterMalleabilityEnabled()) {
+			SlurmAPI::initialize();
 		}
 	}
 #else // HAVE_SLURM
@@ -169,6 +167,14 @@ ClusterManager::~ClusterManager()
 	OffloadedTaskIdManager::finalize();
 	WriteIDManager::finalize();
 	MessageId::finalize();
+
+#if HAVE_SLURM
+	if (SlurmAPI::isEnabled()) {
+		assert(ClusterManager::isMasterNode());
+		assert(ClusterManager::getInitData().clusterMalleabilityEnabled());
+		SlurmAPI::finalize();
+	}
+#endif // HAVE_SLURM
 
 	for (auto &node : _clusterNodes) {
 		delete node;
@@ -463,7 +469,8 @@ int ClusterManager::nanos6Resize(int delta)
 	assert(ClusterManager::isMasterNode());
 	assert(ClusterManager::getInitData().clusterMalleabilityEnabled());
 	// There is more than one host... This will be corrected with multiple processes/node
-	assert(_singleton->_hostnames.size() > 1);
+	assert(SlurmAPI::isEnabled());
+	assert(SlurmAPI::getHostnameVector().size() > 1);
 
 	TaskWait::taskWait("nanos6Resize");
 
@@ -502,10 +509,11 @@ int ClusterManager::nanos6Resize(int delta)
 	}
 
 	if (delta > 0) {
-		assert((size_t)oldSize < _singleton->_hostnames.size());
+		assert((size_t)oldSize < SlurmAPI::getHostnameVector().size());
 
 		// Master sends spawn messages to all the OLD world
-		MessageResize msgResize(delta, _singleton->_hostnames[oldSize]);
+		MessageResize msgResize(delta, SlurmAPI::getHostnameVector()[oldSize]);
+
 		ClusterManager::sendMessageToAll(&msgResize, true);
 
 		// this is the same call that message handler does. So any improvement in resize will be

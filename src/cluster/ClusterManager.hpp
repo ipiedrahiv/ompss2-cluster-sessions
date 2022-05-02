@@ -47,7 +47,6 @@ private:
 	std::vector<ClusterNode *> _clusterNodes;
 
 	//! Malleability variables
-	std::vector<std::string> _hostnames;
 	struct DataInitSpawn _dataInit;
 
 	//! ClusterNode object of the current node
