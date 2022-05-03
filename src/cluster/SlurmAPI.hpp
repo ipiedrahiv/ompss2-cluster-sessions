@@ -16,7 +16,12 @@
 // slurm in order to distribute the work properly.
 class SlurmAPI {
 
-	std::vector<std::string> _nodelist_vector;
+	struct SlurmHostInfo {
+		std::string hostname;
+		size_t nprocesses;
+	};
+
+	std::vector<SlurmHostInfo> _nodelist_vector;
 	const size_t _cpus_per_task, _cpus_per_node;
 
 	static SlurmAPI *_singleton;
@@ -43,7 +48,7 @@ public:
 		// Initialize the node list.
 		char *host;
 		while ((host = slurm_hostlist_shift(hostlist))) {
-			_nodelist_vector.push_back(host);
+			_nodelist_vector.push_back({.hostname = host, .nprocesses = 0});
 		}
 		slurm_hostlist_destroy(hostlist);
 
@@ -58,7 +63,7 @@ public:
 			// list As this function is used only on master, a more complete approach must be to use
 			// the SLURM_JOB_NODELIST environment variable and remove the elements.
 			FatalErrorHandler::failIf(
-				strncmp(this_hostname, _nodelist_vector[0].c_str(), HOST_NAME_MAX) != 0,
+				_nodelist_vector[0].hostname != std::string(this_hostname),
 				"The master's hostname is not the first in the list.");
 		} else {
 			FatalErrorHandler::warn("Couldn't get hostname to assert that the list is correct.");
@@ -85,7 +90,7 @@ public:
 		return _singleton != nullptr;
 	}
 
-	static const std::vector<std::string> &getHostnameVector()
+	static const std::vector<SlurmHostInfo> &getHostnameVector()
 	{
 		assert(_singleton != nullptr);
 		return _singleton->_nodelist_vector;

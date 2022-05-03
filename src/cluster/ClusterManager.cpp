@@ -512,7 +512,7 @@ int ClusterManager::nanos6Resize(int delta)
 		assert((size_t)oldSize < SlurmAPI::getHostnameVector().size());
 
 		// Master sends spawn messages to all the OLD world
-		MessageResize msgResize(delta, SlurmAPI::getHostnameVector()[oldSize]);
+		MessageResize msgResize(delta, SlurmAPI::getHostnameVector()[oldSize].hostname);
 
 		ClusterManager::sendMessageToAll(&msgResize, true);
 
