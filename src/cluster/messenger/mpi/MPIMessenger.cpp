@@ -187,6 +187,11 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 		abort();
 	}
 
+	int groupSize = 0;
+	ret = MPI_Comm_size(MPI_COMM_WORLD, &groupSize);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	assert(groupSize > 0);
+
 	// Set the error handler to MPI_ERRORS_RETURN so we can use a check latter.  The error handler
 	// is inherited by any created messenger latter, so we don't need to set it again.
 	// TODO: Instead of checking on every MPI call we must define a propper MPI error handler.  The
@@ -230,19 +235,36 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 			}
 			_instrumentationRank = _externalRank;
 
-			//! Create a new communicator
+			// Create a new communicator
+			// When there is not parent this is part of the initial communicator.
 			ret = MPI_Comm_dup(MPI_COMM_WORLD, &INTRA_COMM);
+			MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
 		}
 	} else {
+		FatalErrorHandler::failIf(
+			clusterSplitEnv.isPresent(),
+			"Malleability doesn't work with hybrid MPI+OmpSs-2@Cluster"
+		);
+
 		// This is a spawned process.
 		_apprankNum = 0;
 		_numAppranks = 1;
 		_numInstancesThisNode = 1; // Not used
 		_instrumentationRank = _externalRank;
+
+		// The first element in the vector is information about the current MPI_COMM_WORLD when the
+		// process is spawned. In all the cases it has the size of the number of spawns performed to
+		// assert that we can shrink.
+		_spawnedCommInfoVector.push_back({
+				.intraComm = INTRA_COMM,
+				.interComm = PARENT_COMM,
+				.groupSize = groupSize
+			});
+
+		// This is a spawned process, so merge with the parent communicator..
 		ret = MPI_Intercomm_merge(PARENT_COMM, true,  &INTRA_COMM);
-		FatalErrorHandler::failIf(clusterSplitEnv.isPresent(), "Malleability doesn't work with hybrid MPI+OmpSs-2@Cluster");
+		MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
 	}
-	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
 
 	//! Get the upper-bound tag supported by current MPI implementation
 	int ubIsSetFlag = 0, *mpi_ub_tag = nullptr;
@@ -720,6 +742,7 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 {
 	assert(delta > 0);
 	MPI_Comm newinter = MPI_COMM_NULL;               // Temporal intercomm
+	MPI_Comm newintra = MPI_COMM_NULL;               // Temporal intracomm
 
 	MPI_Info info;
 	MPI_Info_create(&info);
@@ -731,13 +754,16 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 	FatalErrorHandler::failIf(errcode != MPI_SUCCESS, "New process returned error code: ", errcode);
 
-	ret = MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
+	ret = MPI_Intercomm_merge(newinter, false, &newintra); // Create new intra
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 
-	ret = MPI_Intercomm_merge(newinter, false, &INTRA_COMM); // Create new intra
-	MPIErrorHandler::handle(ret, INTRA_COMM);
+	_spawnedCommInfoVector.push_back({
+			.intraComm = INTRA_COMM,
+			.interComm = newinter,
+			.groupSize = delta
+		});
 
-	spawnedCommVector.push_back({newinter, delta});
+	INTRA_COMM = newintra;
 
 	ret = MPI_Info_free(&info);
 	MPIErrorHandler::handle(ret, INTRA_COMM);
@@ -752,32 +778,37 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 int MPIMessenger::messengerShrink(int delta)
 {
 	assert(delta < 0);
+	assert(_spawnedCommInfoVector.size() > 0);                  // We have some spawns to shrink.
 	int newsize = _wsize + delta;
-	assert(newsize >= 1);
-	const int survive = (_wrank < newsize);
+	if (newsize < 1) {
+		FatalErrorHandler::warn("Can't resize below current size.");
+		return _wsize;
+	};
 
-	MPI_Comm newintra = MPI_COMM_NULL;
+	const int willdie = (_wrank >= newsize);
 
-	int ret = MPI_Comm_split(INTRA_COMM, survive, 0, &newintra);
-	MPIErrorHandler::handle(ret, INTRA_COMM);
+	do {
+		struct commInfo &spawnedCommInfo = _spawnedCommInfoVector.back();
+		_spawnedCommInfoVector.pop_back();
 
-	ret = MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
-	INTRA_COMM = newintra;
-	MPIErrorHandler::handle(ret, INTRA_COMM);
+		assert(INTRA_COMM != MPI_COMM_WORLD);
 
-	if (survive) {
-		ret = MPI_Comm_disconnect(&spawnedCommVector.back().interComm);
+		int ret = MPI_Comm_free(&INTRA_COMM);             // Free old intracomm before.
+		INTRA_COMM = spawnedCommInfo.intraComm;
 		MPIErrorHandler::handle(ret, INTRA_COMM);
-		spawnedCommVector.pop_back();
+
+		ret = MPI_Comm_disconnect(&spawnedCommInfo.interComm);
+		MPIErrorHandler::handle(ret, INTRA_COMM);
+	} while (willdie && _spawnedCommInfoVector.size() > 0);
+
+
+	if (!willdie) {
+		assert(INTRA_COMM != MPI_COMM_WORLD);
 
 		MessengerReinitialize();
 		assert(newsize == _wsize);
 		return _wsize;
 	}
-
-	assert(spawnedCommVector.size() == 0);
-	ret = MPI_Comm_disconnect(&PARENT_COMM);
-	MPIErrorHandler::handle(ret, INTRA_COMM);
 
 	return 0;
 }

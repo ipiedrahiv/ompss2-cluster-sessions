@@ -24,6 +24,7 @@ class MPIMessenger : public Messenger {
 private:
 
 	struct commInfo {
+		MPI_Comm intraComm;
 		MPI_Comm interComm;
 		int groupSize;
 	};
@@ -36,7 +37,7 @@ private:
 	MPI_Comm INTRA_COMM_DATA_RAW = MPI_COMM_NULL;
 	MPI_Comm PARENT_COMM = MPI_COMM_NULL;
 
-	std::vector<commInfo> spawnedCommVector;
+	std::vector<commInfo> _spawnedCommInfoVector;
 
 	// Upper bound MPI tag supported by current implementation, used for masking MPI tags to prevent
 	// out-of-range MPI tags when sending/receiving large number of messages.
