@@ -156,14 +156,14 @@ namespace ClusterPollingServices {
 					std::lock_guard<PaddedSpinLock<>> guard2(_singleton._incomingLock);
 					done = _singleton._pendings.empty() && _singleton._incomingPendings.empty();
 				}
-				// if (!done) {
-				// 	Instrument::logMessage(
-				// 		Instrument::ThreadInstrumentationContext::getCurrent(),
-				// 		"Waiting for all messages pendings and incomming"
-				// 	);
-				// 	sleep(1);
-				// 	//executeService();
-				// }
+				if (!done) {
+					Instrument::logMessage(
+						Instrument::ThreadInstrumentationContext::getCurrent(),
+						"Waiting for all messages pendings and incomming"
+					);
+					//sleep(1);
+					executeService();
+				}
 			}
 		}
 

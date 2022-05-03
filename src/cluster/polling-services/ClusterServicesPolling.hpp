@@ -78,12 +78,16 @@ public:
 
 	inline static void waitUntilFinished()
 	{
+		ClusterPollingServices::MessageHandler<Message>::waitUntilFinished();
 		ClusterPollingServices::PendingQueue<Message>::waitUntilFinished();
 		ClusterPollingServices::PendingQueue<DataTransfer>::waitUntilFinished();
 	}
 
 	inline static void setPauseStatus(bool pause)
 	{
+		if (pause) {
+			ClusterPollingServices::MessageHandler<Message>::waitUntilFinished();
+		}
 		_pausedServices.store(pause);
 	}
 

@@ -424,10 +424,10 @@ int ClusterManager::nanos6Shrink(const MessageResize *msg_shrink)
 	ClusterServicesTask::setPauseStatus(true);
 	ClusterServicesPolling::setPauseStatus(true);
 
-	// messenger calls spawn and merge
+	// messenger calls spawn and merge, returns zero in the dying nodes.
 	const int newSize = _singleton->_msn->messengerShrink(delta);
 
-	if (newSize > 0) {
+	if (newSize > 0) { // Condition for surviving nodes
 		assert(newSize == oldSize + delta);
 		const int newIndex = _singleton->_msn->getNodeIndex();
 		assert(newIndex == oldIndex);
@@ -455,9 +455,9 @@ int ClusterManager::nanos6Shrink(const MessageResize *msg_shrink)
 			ClusterServicesTask::setPauseStatus(false);
 		}
 
-	} else {
-		MessageSysFinish sysFinish;
-		sysFinish.handleMessage();
+	} else {           // newSize is zero when this is a dying rank.
+		MessageSysFinish msg;
+		msg.handleMessage();
 	}
 
 	return newSize;

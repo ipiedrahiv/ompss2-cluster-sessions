@@ -344,7 +344,7 @@ namespace ClusterPollingServices {
 		{
 			assert(_singleton._numStolen == 0);
 			assert(_singleton._live.load() == true);
-			_singleton._live = false;
+			_singleton._live.store(false);
 		}
 	};
 
