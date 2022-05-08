@@ -1375,7 +1375,6 @@ noinst_HEADERS += \
 	src/cluster/messages/MessageTaskNew.hpp \
 	src/cluster/messenger/TransferBase.hpp \
 	src/cluster/messages/MessageResize.hpp \
-	src/cluster/messages/DataInitSpawn.hpp \
 	src/cluster/messenger/DataTransfer.hpp \
 	src/cluster/messenger/LiveDataTransfers.hpp \
 	src/cluster/messenger/Messenger.hpp \

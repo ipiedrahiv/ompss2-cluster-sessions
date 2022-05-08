@@ -10,7 +10,6 @@
 #include <regex>
 
 #include "VirtualMemoryManagement.hpp"
-#include "cluster/ClusterManager.hpp"
 #include "cluster/messages/MessageId.hpp"
 #include "hardware/HardwareInfo.hpp"
 #include "hardware/cluster/ClusterNode.hpp"
@@ -159,7 +158,7 @@ DataAccessRegion VirtualMemoryManagement::findSuitableMemoryRegion()
 }
 
 
-const DataInitSpawn &VirtualMemoryManagement::setupInitData()
+const ClusterManager::DataInitSpawn &VirtualMemoryManagement::setupInitData()
 {
 	// This function is called BEFORE the constructor. It actually may be in the ClusterManager, But
 	// I implemented it here because it handles memory stuff.
@@ -167,7 +166,7 @@ const DataInitSpawn &VirtualMemoryManagement::setupInitData()
 
 	// Get the maximum size, when zero malleability is disabled, when numeric limit something is
 	// wrong. If malleability is disabled then use the current cluster size.
-	DataInitSpawn &initData = ClusterManager::getInitData();
+	ClusterManager::DataInitSpawn &initData = ClusterManager::getInitData();
 
 	if (initData._virtualAllocation.empty()) {
 		assert(initData._virtualDistributedRegion.empty());
@@ -220,7 +219,7 @@ const DataInitSpawn &VirtualMemoryManagement::setupInitData()
 	return initData;
 }
 
-VirtualMemoryManagement::VirtualMemoryManagement(const DataInitSpawn &initData)
+VirtualMemoryManagement::VirtualMemoryManagement(const ClusterManager::DataInitSpawn &initData)
 	: _allocation(new VirtualMemoryAllocation(initData._virtualAllocation)),
 	  _distributedVirtualRegion(new VirtualMemoryArea(initData._virtualDistributedRegion)),
 	  _localSizePerNode(initData._localSizePerNode)

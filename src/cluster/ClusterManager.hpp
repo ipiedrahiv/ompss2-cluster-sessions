@@ -23,7 +23,7 @@
 #include <ClusterShutdownCallback.hpp>
 #include "memory/directory/Directory.hpp"
 
-#include "messages/DataInitSpawn.hpp"
+
 
 namespace ExecutionWorkflow
 {
@@ -34,6 +34,19 @@ class ClusterMemoryNode;
 class MessageResize;
 
 class ClusterManager {
+public:
+	struct DataInitSpawn {
+		DataAccessRegion _virtualAllocation;
+		DataAccessRegion _virtualDistributedRegion;
+		size_t _localSizePerNode = 0, _numMinNodes = 0, _numMaxNodes = 0;
+
+		inline bool clusterMalleabilityEnabled() const
+		{
+			assert(_numMinNodes != 0);
+			assert(_numMaxNodes != 0);
+			return _numMinNodes != _numMaxNodes;
+		}
+	};
 
 private:
 	bool _clusterRequested; // Built with cluster and cluster.communication is not disabled

@@ -7,13 +7,12 @@
 #ifndef __VIRTUAL_MEMORY_MANAGEMENT_HPP__
 #define __VIRTUAL_MEMORY_MANAGEMENT_HPP__
 
+#include "cluster/ClusterManager.hpp"
 #include "memory/vmm/VirtualMemoryArea.hpp"
 #include <ClusterNode.hpp>
 #include <Directory.hpp>
 
 #include <vector>
-
-class DataInitSpawn;
 
 class VirtualMemoryManagement {
 public:
@@ -94,13 +93,13 @@ private:
 	//! addresses for local NUMA allocations
 	std::vector<VirtualMemoryArea *> _localNUMAVMA;
 
-	static DataInitSpawn const &setupInitData();
+	static ClusterManager::DataInitSpawn const &setupInitData();
 
 	//! Setting up the memory layout
 	void setupMemoryLayout();
 
 	//! private constructor, this is a singleton.
-	VirtualMemoryManagement(const DataInitSpawn &initData);
+	VirtualMemoryManagement(const ClusterManager::DataInitSpawn &initData);
 
 	~VirtualMemoryManagement();
 
@@ -110,7 +109,7 @@ public:
 
 	static inline void initialize()
 	{
-		const DataInitSpawn &initData = VirtualMemoryManagement::setupInitData();
+		const ClusterManager::DataInitSpawn &initData = VirtualMemoryManagement::setupInitData();
 
 		assert(_singleton == nullptr);
 		_singleton = new VirtualMemoryManagement(initData);

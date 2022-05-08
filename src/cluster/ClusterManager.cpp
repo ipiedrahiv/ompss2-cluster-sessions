@@ -9,7 +9,6 @@
 #include "messages/MessageSysFinish.hpp"
 #include "messages/MessageDataFetch.hpp"
 #include "messages/MessageResize.hpp"
-#include "messages/DataInitSpawn.hpp"
 
 #include "messenger/Messenger.hpp"
 #include "polling-services/ClusterServicesPolling.hpp"

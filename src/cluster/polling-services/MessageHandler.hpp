@@ -148,7 +148,6 @@ namespace ClusterPollingServices {
 
 				case DATA_RAW:
 				case TOTAL_MESSAGE_TYPES:
-				case INIT_SPAWNED:
 					// We should never see these messages
 					FatalErrorHandler::fail(
 						"Message handler tried to queue a message type: ", msg->getName()
@@ -211,7 +210,6 @@ namespace ClusterPollingServices {
 
 				case DATA_RAW:
 				case TOTAL_MESSAGE_TYPES:
-				case INIT_SPAWNED:
 					// We should never see these messages
 					FatalErrorHandler::fail(
 						"Message handler tried to notifyDone a message type: ", msg->getName()
