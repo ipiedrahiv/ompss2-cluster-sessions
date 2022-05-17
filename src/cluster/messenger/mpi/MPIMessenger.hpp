@@ -147,7 +147,7 @@ private:
 	void setApprankNumber(const std::string &clusterSplit, int &internalRank);
 	void shareDLBInfo();
 
-	void messengerReinitialize();
+	void messengerReinitialize(bool willdie);
 
 public:
 

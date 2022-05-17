@@ -170,6 +170,7 @@ ClusterManager::~ClusterManager()
 #if HAVE_SLURM
 	if (SlurmAPI::isEnabled()) {
 		assert(ClusterManager::isMasterNode());
+		assert(!ClusterManager::isSpawned());
 		assert(ClusterManager::getInitData().clusterMalleabilityEnabled());
 		SlurmAPI::finalize();
 	}
@@ -269,6 +270,7 @@ void ClusterManager::shutdownPhase1()
 	}
 
 	if (ClusterManager::getMessenger() != nullptr && ClusterManager::isMasterNode()) {
+		assert(!ClusterManager::isSpawned());
 		MessageSysFinish msg;
 		ClusterManager::sendMessageToAll(&msg, true);
 
@@ -358,42 +360,95 @@ void ClusterManager::fetchVector(
 	_singleton->_msn->sendMessage(msg, remoteNode);
 }
 
-int ClusterManager::nanos6Spawn(const MessageResize *msg_spawn)
+int ClusterManager::nanos6Spawn(const MessageSpawn *msg_spawn)
 {
 	assert(_singleton != nullptr);
 	assert(_singleton->_msn != nullptr);
 
-	const int delta = msg_spawn->getDelta();
-	const std::string hostname = msg_spawn->getHostname();
-
-	assert(delta > 0);
 	const __attribute__((unused)) int oldIndex = _singleton->_msn->getNodeIndex();
 	const int oldSize = ClusterManager::clusterSize();
+	int newSize = oldSize;
 
 	// Stop polling services.
 	if (oldSize > 1) {
 		ClusterServicesTask::setPauseStatus(true);
 		ClusterServicesPolling::setPauseStatus(true);
 	}
-	// messenger calls spawn and merge
-	const int newSize = _singleton->_msn->messengerSpawn(delta, hostname);
-	assert(newSize == oldSize + delta);
-	const int newIndex = _singleton->_msn->getNodeIndex();
-	assert(newIndex == oldIndex);
 
-	// Register the new nodes and their memory
-	for (int i = oldSize; i < newSize; ++i) {
-		ClusterNode *node = new ClusterNode(i, i, 0, false, i);
-		_singleton->_clusterNodes.push_back(node);
-		VirtualMemoryManagement::registerNodeLocalRegion(node);
+	const int delta = msg_spawn->getDeltaNodes();
+	assert(delta > 0);
+	const size_t nEntries = msg_spawn->getNEntries();
+
+	int spawned = 0;
+
+	for (size_t ent = 0; ent < nEntries; ++ent) {
+		const MessageSpawnHostInfo &info = msg_spawn->getEntries()[ent];
+
+		const std::string hostname(info.hostname);
+		const size_t nprocs = info.nprocs;
+		const int lastSize = ClusterManager::clusterSize();
+		assert(lastSize == oldSize + spawned);
+
+		// messenger calls spawn and merge
+		newSize = _singleton->_msn->messengerSpawn(delta, hostname);
+		assert(_singleton->_msn->getNodeIndex() == oldIndex);
+
+		// Register the new nodes and their memory
+		for (int i = oldSize; i < newSize; ++i) {
+			ClusterNode *node = new ClusterNode(i, i, 0, false, i);
+			_singleton->_clusterNodes.push_back(node);
+			VirtualMemoryManagement::registerNodeLocalRegion(node);
+		}
+		assert(ClusterManager::clusterSize() == newSize);
+		spawned += nprocs;
+		ClusterManager::synchronizeAll();
+
+		if (ClusterManager::isMasterNode()) {
+			// Then master sends the init message to the new processes. We need to send a separate
+			// message to inform the new processes that the spawn is not finished because the
+			// ClusterManager::sendDataRaw and its counter part expect a fixed size message and the
+			// polling services on the new nodes are not running yet either.
+			MessageSpawn *msg_spawn_i = nullptr;
+
+			// create a temporal message with spawn instructions from ent + 1 -> nEntries for the
+			// new processes created in this iteration only.
+			const size_t nextEnt = ent + 1;
+			const int pending = delta - spawned;
+			assert(pending >= 0);         // We never spawn more processes than delta
+			if (nextEnt < nEntries) {
+				assert(pending > 0);      // We still have processes to spawn
+				msg_spawn_i = new MessageSpawn(
+					pending, nEntries - nextEnt, &msg_spawn->getEntries()[nextEnt]
+				);
+			}
+
+			// TODO: All these messages are blocking; we may improve this code to make it async. The
+			// eassiest way may be to modify the messages to have a reference counter and
+			// ClusterPollingServices::PendingQueue<Message>::addPending to search in the pending
+			// queue for this message.
+			// We could also make the setMessengerData to have a list
+			DataAccessRegion init_region((void *)&_singleton->_dataInit, sizeof(DataInitSpawn));
+			for (int i = lastSize; i < newSize; ++i) {
+
+				ClusterNode *target = ClusterManager::getClusterNode(i);
+				assert(target != nullptr);
+				assert(target->getMemoryNode() != nullptr);
+
+				ClusterManager::sendDataRaw(init_region, target->getMemoryNode(), 1, true);
+				if (msg_spawn_i != nullptr) {
+					ClusterManager::sendMessage(msg_spawn_i, target, true);
+				}
+			}
+
+			delete msg_spawn_i;
+		}
 	}
-	assert(ClusterManager::clusterSize() == newSize);
+	assert(newSize == oldSize + delta);
 
+	const int newIndex = _singleton->_msn->getNodeIndex();
 	MessageId::reset(newIndex, newSize);
 	WriteIDManager::reset(newIndex, newSize);
 	OffloadedTaskIdManager::reset(newIndex, newSize);
-
-	ClusterManager::synchronizeAll();
 
 	if (oldSize == 1) { // When we started with a single node polling services didn't start.
 		ClusterServicesPolling::initialize();
@@ -407,15 +462,13 @@ int ClusterManager::nanos6Spawn(const MessageResize *msg_spawn)
 	return newSize;
 }
 
-int ClusterManager::nanos6Shrink(const MessageResize *msg_shrink)
+int ClusterManager::nanos6Shrink(const MessageShrink *msg_shrink)
 {
 	assert(_singleton != nullptr);
 	assert(_singleton->_msn != nullptr);
 
-	const int delta = msg_shrink->getDelta();
+	const int delta = msg_shrink->getDeltaNodes();
 	assert(delta < 0);
-	const std::string hostname = msg_shrink->getHostname();
-	assert(hostname.empty());
 
 	const __attribute__((unused)) int oldIndex = _singleton->_msn->getNodeIndex();
 	const int oldSize = ClusterManager::clusterSize();
@@ -445,18 +498,18 @@ int ClusterManager::nanos6Shrink(const MessageResize *msg_shrink)
 
 		ClusterManager::synchronizeAll();
 
-		if (newSize == 1) { // When we started with a single node polling services didn't start.
-			ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
-			ClusterServicesPolling::shutdown();
-		} else {            // Restart the polling services
-			assert(newSize > 1);
-			ClusterServicesPolling::setPauseStatus(false);
-			ClusterServicesTask::setPauseStatus(false);
-		}
-
 	} else {           // newSize is zero when this is a dying rank.
 		MessageSysFinish msg;
 		msg.handleMessage();
+	}
+
+	if (newSize == 1) { // When we started with a single node polling services didn't start.
+		ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
+		ClusterServicesPolling::shutdown();
+	} else {            // Restart the polling services
+		//assert(newSize > 1);
+		ClusterServicesPolling::setPauseStatus(false);
+		ClusterServicesTask::setPauseStatus(false);
 	}
 
 	return newSize;
@@ -510,32 +563,30 @@ int ClusterManager::nanos6Resize(int delta)
 	if (delta > 0) {
 		assert((size_t)oldSize < SlurmAPI::getHostnameVector().size());
 
-		// Master sends spawn messages to all the OLD world
-		MessageResize msgResize(delta, SlurmAPI::getHostnameVector()[oldSize].hostname);
+		// TODO: Any spawn policy to implement may be done here in the hostInfos.
+		std::vector<MessageSpawnHostInfo> hostInfos;
+		hostInfos.push_back(
+			MessageSpawnHostInfo(SlurmAPI::getHostnameVector()[oldSize].hostname, (size_t) delta)
+		);
 
-		ClusterManager::sendMessageToAll(&msgResize, true);
+		// Master sends spawn messages to all the OLD world
+		MessageSpawn msgSpawn(delta, hostInfos);
+
+		ClusterManager::sendMessageToAll(&msgSpawn, true);
 
 		// this is the same call that message handler does. So any improvement in resize will be
 		// done in nanos6Spawn not here because that will be executed by all the processes.
-		const int newSize = ClusterManager::nanos6Spawn(&msgResize);
+		__attribute__((unused)) const int newSize = ClusterManager::nanos6Spawn(&msgSpawn);
 		assert(newSize == expectedSize);
 
-		// Then master sends the init message to the new processes.
-		DataAccessRegion init_region((void *)&_singleton->_dataInit, sizeof(DataInitSpawn));
-		for (int i = oldSize; i < newSize; ++i) {
-
-			ClusterNode *target = ClusterManager::getClusterNode(i);
-			assert(target != nullptr);
-			assert(target->getMemoryNode() != nullptr);
-
-			ClusterManager::sendDataRaw(init_region, target->getMemoryNode(), 1, true);
-		}
 	} else if (delta < 0) {
-		MessageResize msgResize(delta, "");
-		ClusterManager::sendMessageToAll(&msgResize, true);
+		std::vector<MessageShrinkDataInfo> accesses;
 
-		__attribute__((unused)) const int newSize = ClusterManager::nanos6Shrink(&msgResize);
-		assert(newSize == expectedSize || newSize == 0);
+		MessageShrink msgShrink(delta, accesses);
+		ClusterManager::sendMessageToAll(&msgShrink, true);
+
+		__attribute__((unused)) const int newSize = ClusterManager::nanos6Shrink(&msgShrink);
+		assert(newSize == expectedSize || newSize == 0); // zero for dying nodes
 	}
 
 	return expectedSize;

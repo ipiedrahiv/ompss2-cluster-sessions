@@ -16,6 +16,7 @@
 #include "cluster/messenger/TransferBase.hpp"
 #include "cluster/messenger/Messenger.hpp"
 #include "cluster/messenger/DataTransfer.hpp"
+#include "cluster/messages/MessageResize.hpp"
 
 #include <ClusterNode.hpp>
 #include <MessageDataFetch.hpp>
@@ -23,15 +24,12 @@
 #include <ClusterShutdownCallback.hpp>
 #include "memory/directory/Directory.hpp"
 
-
-
 namespace ExecutionWorkflow
 {
 	class ClusterDataCopyStep;
 }
 
 class ClusterMemoryNode;
-class MessageResize;
 
 class ClusterManager {
 public:
@@ -101,8 +99,8 @@ public:
 	//!
 	//! \param[in] Number of desired new nodes
 	//! \returns On success returns delta.
-	static int nanos6Spawn(const MessageResize *msg_spawn);
-	static int nanos6Shrink(const MessageResize *msg_shrink);
+	static int nanos6Spawn(const MessageSpawn *msg_spawn);
+	static int nanos6Shrink(const MessageShrink *msg_shrink);
 
 	//! \brief Initialize the ClusterManager
 	//! This is called before initializing the memory allocator because it collects some

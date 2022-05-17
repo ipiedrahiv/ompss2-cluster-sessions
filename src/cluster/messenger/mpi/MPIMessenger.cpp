@@ -203,6 +203,14 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 	ret = MPI_Comm_get_parent(&PARENT_COMM);
 	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
 
+	// The first element in the vector is information about the current INTRA_COMM before any merge.
+	// WHen the process is not spawned then PARENT_COMM is MPI_COMM_NULL
+	_spawnedCommInfoStack.push({
+			.intraComm = INTRA_COMM,
+			.interComm = PARENT_COMM,
+			.groupSize = groupSize
+		});
+
 	//! Create a new communicator
 	ConfigVariable<std::string> clusterSplitEnv("cluster.hybrid.split");
 	if (PARENT_COMM == MPI_COMM_NULL) {
@@ -251,15 +259,6 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 		_numAppranks = 1;
 		_numInstancesThisNode = 1; // Not used
 		_instrumentationRank = _externalRank;
-
-		// The first element in the vector is information about the current MPI_COMM_WORLD when the
-		// process is spawned. In all the cases it has the size of the number of spawns performed to
-		// assert that we can shrink.
-		_spawnedCommInfoStack.push({
-				.intraComm = INTRA_COMM,
-				.interComm = PARENT_COMM,
-				.groupSize = groupSize
-			});
 
 		// This is a spawned process, so merge with the parent communicator..
 		ret = MPI_Intercomm_merge(PARENT_COMM, true,  &INTRA_COMM);
@@ -716,7 +715,7 @@ void MPIMessenger::summarizeSplit() const
 	Instrument::summarizeSplit(_externalRank, _physicalNodeNum, _apprankNum);
 }
 
-void MPIMessenger::messengerReinitialize()
+void MPIMessenger::messengerReinitialize(bool willdie)
 {
 	int ret;
 	//! make sure the new communicator returns errors
@@ -726,6 +725,10 @@ void MPIMessenger::messengerReinitialize()
 		MPIErrorHandler::handle(ret, INTRA_COMM);
 	} else {
 		INTRA_COMM_DATA_RAW = INTRA_COMM;
+	}
+
+	if (willdie) {
+		return;
 	}
 
 	int newrank = -1, newsize = -1;;
@@ -750,7 +753,11 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 
 	int errcode = 0;
 
-	int ret = MPI_Comm_spawn(_argv[0], &_argv[1], delta, info, 0, INTRA_COMM, &newinter, &errcode);
+	int tmp = -1;
+	int ret = MPI_Comm_size(INTRA_COMM, &tmp);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+
+	ret = MPI_Comm_spawn(_argv[0], &_argv[1], delta, info, 0, INTRA_COMM, &newinter, &errcode);
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 	FatalErrorHandler::failIf(errcode != MPI_SUCCESS, "New process returned error code: ", errcode);
 
@@ -769,7 +776,7 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 
 	__attribute__((unused)) const int oldsize = _wsize;
-	messengerReinitialize();
+	messengerReinitialize(false);
 	assert(_wsize == oldsize + delta);                       // New size needs to be bigger
 
 	return _wsize;
@@ -780,15 +787,7 @@ int MPIMessenger::messengerShrink(int delta)
 	assert(delta < 0);
 
 	const int newsize = _wsize + delta;
-	if (newsize < 1) {
-		FatalErrorHandler::warn("Can't resize below current number of nodes.");
-		return _wsize;
-	};
-
-	if (_spawnedCommInfoStack.empty()) {                  // We have some spawns to shrink.
-		FatalErrorHandler::warn("Can't resize when there are no spawned processes.");
-		return _wsize;
-	}
+	FatalErrorHandler::failIf(newsize < 1, "Can't resize below current number of nodes.");
 
 	const int willdie = (_wrank >= newsize);
 	FatalErrorHandler::failIf(willdie && !isSpawned(), "Can't shrink a non-spawned process.");
@@ -810,61 +809,35 @@ int MPIMessenger::messengerShrink(int delta)
 				MessageTypeStr[status.MPI_TAG & 0xff], " from ", status.MPI_SOURCE);
 		}
 #endif // NDEBUG
-
 		struct commInfo &spawnedCommInfo = _spawnedCommInfoStack.top();
 
-		const int loop_remove = std::min(currsize - newsize, spawnedCommInfo.groupSize);
+		FatalErrorHandler::failIf(_spawnedCommInfoStack.size() == 1
+			&& spawnedCommInfo.interComm == MPI_COMM_NULL,
+			"Can't shrink when there are no spawned processes.");
 
-		if (loop_remove == spawnedCommInfo.groupSize) {
-			ret = MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
-			INTRA_COMM = spawnedCommInfo.intraComm;                // Use the next in the stack
-			MPIErrorHandler::handle(ret, INTRA_COMM);
+		FatalErrorHandler::failIf(currsize - newsize < spawnedCommInfo.groupSize,
+			"Can't shrink incomplete communicator.");
 
-			ret = MPI_Comm_disconnect(&spawnedCommInfo.interComm); // disconnect the inter communicator
-			MPIErrorHandler::handle(ret, INTRA_COMM);
+		ret = MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
+		INTRA_COMM = spawnedCommInfo.intraComm;                // Use the next in the stack
+		MPIErrorHandler::handle(ret, INTRA_COMM);
 
-			currsize -= spawnedCommInfo.groupSize;
+		ret = MPI_Comm_disconnect(&spawnedCommInfo.interComm); // disconnect the inter communicator
+		MPIErrorHandler::handle(ret, INTRA_COMM);
 
-			// We can remove the entire group and continue iterating.
-			_spawnedCommInfoStack.pop();
+		currsize -= spawnedCommInfo.groupSize;
 
-		} else {
-			// The spawned group is bigger than the remaining nodes to remove; so we shut down the
-			// extra nodes in spite of they are not going to be released.  Maybe this condition
-			// requires a warning. But here we just update the size of the group for future shrinks,
-			// then split the communicator.
-			assert(loop_remove < spawnedCommInfo.groupSize);
-
-			MPI_Comm newcomm = MPI_COMM_NULL;
-			ret = MPI_Comm_split(INTRA_COMM, willdie, 0, &newcomm);
-			MPIErrorHandler::handle(ret, INTRA_COMM);
-
-			ret = MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
-			INTRA_COMM = newcomm;                                  // Use the next in the stack
-			MPIErrorHandler::handle(ret, INTRA_COMM);
-
-			if (willdie) {
-				// For dying processes we pretend that currsize has not been reduced yet.  But we
-				// update the size of our current intra size to be cleaned in the next iteration.
-				assert(_spawnedCommInfoStack.size() == 1);
-				assert(currsize - newsize == loop_remove);
-
-				spawnedCommInfo.groupSize = loop_remove;
-			} else {
-				assert(loop_remove < spawnedCommInfo.groupSize);
-				spawnedCommInfo.groupSize -= loop_remove;
-				currsize -= loop_remove;
-				assert(currsize == newsize);                       // This will break the loop
-			}
-		}
+		// We can remove the entire group and continue iterating.
+		_spawnedCommInfoStack.pop();
 	}
+
+	messengerReinitialize(willdie);
 
 	if (willdie) {
 		assert(_spawnedCommInfoStack.empty());
 		return 0;
 	}
 
-	messengerReinitialize();
 	assert(newsize == _wsize);
 	return _wsize;
 }

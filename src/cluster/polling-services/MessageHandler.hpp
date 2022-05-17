@@ -92,7 +92,8 @@ namespace ClusterPollingServices {
 				break;
 
 				case SYS_FINISH:
-				case RESIZE:
+				case SHRINK:
+				case SPAWN:
 					// * These messages are the last ones to be processes... they must be the last
 					// * of all to be handled ones
 					assert(_nonStealableLowPriorityMessage == nullptr);
@@ -176,7 +177,8 @@ namespace ClusterPollingServices {
 				case SATISFIABILITY:
 				case RELEASE_ACCESS_AND_FINISH:
 				case TASK_FINISHED:
-				case RESIZE:
+				case SHRINK:
+				case SPAWN:
 					// These messages have no ordering constraints, so do nothing
 					break;
 

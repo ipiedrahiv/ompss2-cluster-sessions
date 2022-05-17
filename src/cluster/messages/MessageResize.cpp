@@ -7,28 +7,25 @@
 #include "MessageResize.hpp"
 #include <ClusterManager.hpp>
 
-MessageResize::MessageResize(int deltaNodes, std::string hostname)
-	: Message(RESIZE, sizeof(ResizeMessageContent))
+template<>
+bool MessageSpawn::handleMessage()
 {
-	assert(deltaNodes != 0);
-	_content = reinterpret_cast<ResizeMessageContent *>(_deliverable->payload);
-	_content->_deltaNodes = deltaNodes;
-	strncpy(_content->_hostname, hostname.c_str(), HOST_NAME_MAX);
-}
-
-bool MessageResize::handleMessage()
-{
-	const int deltaNodes = _content->_deltaNodes;
-
-	FatalErrorHandler::failIf(deltaNodes == 0, "Handling resize message with delta == 0");
-	if (deltaNodes > 0) {
-		ClusterManager::nanos6Spawn(this);
-	} else {
-		ClusterManager::nanos6Shrink(this);
-	}
-
+	assert(_content->_deltaNodes > 0);
+	ClusterManager::nanos6Spawn(this);
 	return true;
 }
 
-static const bool __attribute__((unused))_registered_resize =
-	Message::RegisterMSGClass<MessageResize>(RESIZE);
+template<>
+bool MessageShrink::handleMessage()
+{
+	assert(_content->_deltaNodes < 0);
+	ClusterManager::nanos6Shrink(this);
+	return true;
+}
+
+
+static const bool __attribute__((unused))_registered_spawn =
+	Message::RegisterMSGClass<MessageSpawn>(SPAWN);
+
+static const bool __attribute__((unused))_registered_shrink =
+	Message::RegisterMSGClass<MessageShrink>(SHRINK);
