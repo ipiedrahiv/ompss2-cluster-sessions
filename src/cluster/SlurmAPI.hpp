@@ -48,7 +48,8 @@ public:
 		// Initialize the node list.
 		char *host;
 		while ((host = slurm_hostlist_shift(hostlist))) {
-			_nodelist_vector.push_back({.hostname = host, .nprocesses = 0});
+			SlurmHostInfo info = {.hostname = host, .nprocesses = 0};
+			_nodelist_vector.push_back(info);
 		}
 		slurm_hostlist_destroy(hostlist);
 

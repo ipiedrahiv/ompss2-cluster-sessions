@@ -205,11 +205,8 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 
 	// The first element in the vector is information about the current INTRA_COMM before any merge.
 	// WHen the process is not spawned then PARENT_COMM is MPI_COMM_NULL
-	_spawnedCommInfoStack.push({
-			.intraComm = INTRA_COMM,
-			.interComm = PARENT_COMM,
-			.groupSize = groupSize
-		});
+	commInfo info = {.intraComm = INTRA_COMM, .interComm = PARENT_COMM, .groupSize = groupSize};
+	_spawnedCommInfoStack.push(info);
 
 	//! Create a new communicator
 	ConfigVariable<std::string> clusterSplitEnv("cluster.hybrid.split");
@@ -764,11 +761,8 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 	ret = MPI_Intercomm_merge(newinter, false, &newintra); // Create new intra
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 
-	_spawnedCommInfoStack.push({
-			.intraComm = INTRA_COMM,
-			.interComm = newinter,
-			.groupSize = delta
-		});
+	commInfo comm_info = {.intraComm = INTRA_COMM, .interComm = newinter, .groupSize = delta};
+	_spawnedCommInfoStack.push(comm_info);
 
 	INTRA_COMM = newintra;
 
