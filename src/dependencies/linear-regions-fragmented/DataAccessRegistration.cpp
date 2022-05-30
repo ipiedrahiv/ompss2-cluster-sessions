@@ -4459,7 +4459,7 @@ namespace DataAccessRegistration {
 						});
 					/* Always continue with the rest of the accesses */
 					return true;
-					});
+			});
 	}
 
 
@@ -5675,18 +5675,14 @@ namespace DataAccessRegistration {
 		{
 			/* No other code should be using this hpDependencyData */
 			bool alreadyTaken = false;
-			assert(hpDependencyData._inUse.compare_exchange_strong(
-				alreadyTaken, true));
+			assert(hpDependencyData._inUse.compare_exchange_strong(alreadyTaken, true));
 		}
 #endif
 
 		{
-			/*
-			 * Process the update operation (which requires the lock
-			 * to be taken on the task's access structures).
-			 */
-			std::lock_guard<TaskDataAccesses::spinlock_t>
-				guard(accessStructures._lock);
+			// Process the update operation (which requires the lock to be taken on the task's
+			// access structures).
+			std::lock_guard<TaskDataAccesses::spinlock_t> guard(accessStructures._lock);
 			processUpdateOperation(updateOperation, hpDependencyData);
 		}
 
@@ -5695,17 +5691,14 @@ namespace DataAccessRegistration {
 		 * the task's access structures.
 		 */
 		processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks(
-			hpDependencyData,
-			computePlace,
-			/* fromBusyThread */ true
+			hpDependencyData, computePlace, /* fromBusyThread */ true
 		);
 
 #ifndef NDEBUG
 		{
 			/* Allow other code to use this hpDependencyData */
 			bool alreadyTaken = true;
-			assert(hpDependencyData._inUse.compare_exchange_strong(
-				alreadyTaken, false));
+			assert(hpDependencyData._inUse.compare_exchange_strong(alreadyTaken, false));
 		}
 #endif
 		Instrument::exitPropagateSatisfiability();
@@ -5717,8 +5710,13 @@ namespace DataAccessRegistration {
 	 *
 	 * It creates taskwait fragments for all entries in the bottom map.
 	 */
-	void handleEnterTaskwait(Task *task, ComputePlace *computePlace, CPUDependencyData &hpDependencyData, bool noflush, bool nonLocalOnly)
-	{
+	void handleEnterTaskwait(
+		Task *task,
+		ComputePlace *computePlace,
+		CPUDependencyData &hpDependencyData,
+		bool noflush,
+		bool nonLocalOnly
+	) {
 		Instrument::enterHandleEnterTaskwait();
 		assert(task != nullptr);
 
@@ -5789,7 +5787,9 @@ namespace DataAccessRegistration {
 			finalizeFragments(task, accessStructures, hpDependencyData);
 
 		}
-		processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks(hpDependencyData, computePlace, true);
+		processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks(
+			hpDependencyData, computePlace, true
+		);
 
 #ifndef NDEBUG
 		{
@@ -5801,8 +5801,11 @@ namespace DataAccessRegistration {
 	}
 
 
-	void handleExitTaskwait(Task *task, ComputePlace *computePlace, CPUDependencyData &hpDependencyData)
-	{
+	void handleExitTaskwait(
+		Task *task,
+		ComputePlace *computePlace,
+		CPUDependencyData &hpDependencyData
+	) {
 		Instrument::enterHandleExitTaskwait();
 		assert(task != nullptr);
 
@@ -5834,11 +5837,8 @@ namespace DataAccessRegistration {
 					return true;
 				});
 
-			/*
-			 * Delete all fragments. These are created when child task accesses
-			 * when the tasks are submitted, and are no longer needed now that all
-			 * child tasks have finished.
-			 */
+			// Delete all fragments. These are created when child task accesses when the tasks are
+			// submitted, and are no longer needed now that all child tasks have finished.
 			accessStructures._accessFragments.processAll(
 				/* processor: called for every fragment */
 				[&](TaskDataAccesses::access_fragments_t::iterator position) -> bool {
@@ -5870,7 +5870,9 @@ namespace DataAccessRegistration {
 				assert ((taskwaitFragment->getObjectType() == taskwait_type)
 					|| (taskwaitFragment->getObjectType() == top_level_sink_type));
 				taskwaitFragment->markAsDiscounted();
-				removeBottomMapTaskwaitOrTopLevelSink(taskwaitFragment, accessStructures, task, hpDependencyData);
+				removeBottomMapTaskwaitOrTopLevelSink(
+					taskwaitFragment, accessStructures, task, hpDependencyData
+				);
 				accessStructures._removalBlockers--;
 				if (accessStructures._removalBlockers == 0) {
 					if (task->decreaseRemovalBlockingCount()) {
@@ -5887,7 +5889,9 @@ namespace DataAccessRegistration {
 		// make it ready). Do it now.
 		if (!hpDependencyData.empty()) {
 			accessStructures._lock.unlock();
-			processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks(hpDependencyData, computePlace, true);
+			processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks(
+				hpDependencyData, computePlace, true
+			);
 			accessStructures._lock.lock();
 		}
 
@@ -5915,9 +5919,7 @@ namespace DataAccessRegistration {
 		accessStructures._subaccessBottomMap.processAll(
 			/* processor: called for every bottom map entry */
 			[&](TaskDataAccesses::subaccess_bottom_map_t::iterator bottomMapPosition) -> bool {
-				/*
-				 * Erase the bottom map entry.
-				 */
+				// Erase the bottom map entry.
 				BottomMapEntry *bottomMapEntry = &(*bottomMapPosition);
 				assert(bottomMapEntry != nullptr);
 				// Locally propagated accesses (autowait) don't get a taskwait fragment

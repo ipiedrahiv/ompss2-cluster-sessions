@@ -238,9 +238,8 @@ public:
 		assert(_singleton != nullptr);
 		assert(!_singleton->_clusterNodes.empty());
 #ifndef NDEBUG
-		if (_singleton->_clusterNodes.size() > 1) {
-			assert(_singleton->_msn != nullptr);
-		} else if (_singleton->_dataInit.clusterMalleabilityEnabled()) {
+		if (_singleton->_clusterNodes.size() > 1
+			|| _singleton->_dataInit.clusterMalleabilityEnabled()) {
 			assert(_singleton->_msn != nullptr);
 		}
 #endif

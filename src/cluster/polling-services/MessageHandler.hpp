@@ -265,11 +265,13 @@ namespace ClusterPollingServices {
 			}
 
 			T *msg = nullptr;
+			Messenger *msn = ClusterManager::getMessenger();
+			assert(msn != nullptr);
 
 			if (_singleton._numWorkers == 0) {
 				// No other worker tasks, so handle the messages right away and sequentially here
 				// (more efficient than below)
-				while ((msg = ClusterManager::checkMail()) != nullptr) {
+				while ((msg = msn->checkMail()) != nullptr) {
 					handleMessageWrapper(msg, true);
 				};
 
@@ -277,7 +279,7 @@ namespace ClusterPollingServices {
 				// At least one other worker, so let other threads steal messages
 				while (true) {
 					// First take all the messages (from the Messenger)
-					while ((msg = ClusterManager::checkMail()) != nullptr) {
+					while ((msg = msn->checkMail()) != nullptr) {
 						// Queue the message, taking account of ordering constraints
 						_singleton.queueMessage(msg);
 					}
