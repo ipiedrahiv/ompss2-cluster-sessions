@@ -4,8 +4,11 @@
 	Copyright (C) 2018-2020 Barcelona Supercomputing Center (BSC)
 */
 
+#include <vector>
+
 #include "ClusterManager.hpp"
 #include "ClusterHybridManager.hpp"
+#include "ClusterMemoryManagement.hpp"
 #include "messages/MessageSysFinish.hpp"
 #include "messages/MessageDataFetch.hpp"
 #include "messages/MessageResize.hpp"
@@ -24,6 +27,8 @@
 #include "WriteID.hpp"
 #include "MessageId.hpp"
 #include "tasks/Task.hpp"
+
+#include "dependencies/linear-regions-fragmented/TaskDataAccesses.hpp"
 
 #include "system/ompss/TaskWait.hpp"
 
@@ -380,8 +385,12 @@ int ClusterManager::nanos6Spawn(const MessageSpawn *msg_spawn)
 	const size_t nEntries = msg_spawn->getNEntries();
 
 	int spawned = 0;
-
 	for (size_t ent = 0; ent < nEntries; ++ent) {
+		// Spawn entries are basically the following spawn steps. As we send a single message with
+		// all the spawn steps to perform. Apart form that the new processes will be informed to
+		// spawn also in case they are created as intermediate processes.  This method is the only
+		// one fully compatible with all the mpi implementations and with the efficiency of
+		// performing everything with a minimal number of messages.
 		const MessageSpawnHostInfo &info = msg_spawn->getEntries()[ent];
 
 		const std::string hostname(info.hostname);
@@ -439,7 +448,6 @@ int ClusterManager::nanos6Spawn(const MessageSpawn *msg_spawn)
 					ClusterManager::sendMessage(msg_spawn_i, target, true);
 				}
 			}
-
 			delete msg_spawn_i;
 		}
 	}
@@ -470,13 +478,58 @@ int ClusterManager::nanos6Shrink(const MessageShrink *msg_shrink)
 	const int delta = msg_shrink->getDeltaNodes();
 	assert(delta < 0);
 
-	const __attribute__((unused)) int oldIndex = _singleton->_msn->getNodeIndex();
+	// Index actually never changes, only size. We prefix these OLD meaning that it was obtained
+	// BEFORE any resize step.
+	const int oldIndex = _singleton->_msn->getNodeIndex();
 	const int oldSize = ClusterManager::clusterSize();
 
 	ClusterServicesTask::setPauseStatus(true);
 	ClusterServicesPolling::setPauseStatus(true);
 
-	// messenger calls spawn and merge, returns zero in the dying nodes.
+	const MessageShrinkDataInfo *dataInfos = msg_shrink->getEntries();
+	std::vector<DataTransfer *> transferList;
+
+	for (size_t i = 0; i < msg_shrink->getNEntries(); ++i) {
+		// When we receive the message, the first we need to do is to process all the transfers.
+		// When a transfer is required and the process is involved (source or target) then we create
+		// the all the data transfers in a non blocking way (otherwise an evident deadlock will be
+		// created). All this needs to be done BEFORE the shrink, so it will be executed over the
+		// initial communicator.
+
+		const MessageShrinkDataInfo &info = dataInfos[i];
+
+		if (info.oldLocationIdx != info.newLocationIdx) {
+			// transfer required.
+			assert(info.tag > 0);
+
+			if (info.oldLocationIdx == oldIndex) {
+				DataTransfer *tmp = ClusterManager::sendDataRaw(
+					info.region,
+					ClusterManager::getMemoryNode(info.newLocationIdx),
+					info.tag,
+					false,
+					false
+				);
+				transferList.push_back(tmp);
+
+			} else if (info.newLocationIdx == oldIndex) {
+				DataTransfer *tmp = ClusterManager::fetchDataRaw(
+					info.region,
+					ClusterManager::getMemoryNode(info.oldLocationIdx),
+					info.tag,
+					false,
+					false
+				);
+				transferList.push_back(tmp);
+			}
+			// TODO: We can add any else condition here for madvise on the other regions or to
+			// cleanup regions based on writeId.
+		}
+	}
+
+	ClusterManager::waitAllCompletion(transferList);
+
+	// messenger calls spawn and merge, returns zero on the dying nodes.
 	const int newSize = _singleton->_msn->messengerShrink(delta);
 
 	if (newSize > 0) { // Condition for surviving nodes
@@ -580,9 +633,116 @@ int ClusterManager::nanos6Resize(int delta)
 		assert(newSize == expectedSize);
 
 	} else if (delta < 0) {
-		std::vector<MessageShrinkDataInfo> accesses;
 
-		MessageShrink msgShrink(delta, accesses);
+		ClusterMemoryManagement::redistributeDmallocs(expectedSize);
+
+		// Process accesses fragments
+		WorkerThread *currentThread = WorkerThread::getCurrentWorkerThread();
+		assert(currentThread != nullptr);
+
+		Task *currentTask = currentThread->getTask();
+		assert(currentTask != nullptr);
+		assert(currentTask->isMainTask());
+
+		const ClusterMemoryNode *thisLocation = ClusterManager::getCurrentMemoryNode();
+
+		TaskDataAccesses &accessStructures = currentTask->getDataAccesses();
+
+		// Here we must construct the accesses
+		std::vector<MessageShrinkDataInfo> shrinkDataInfo(oldSize);
+		int tag = 1;
+
+		accessStructures._accesses.processAll(
+			[&](TaskDataAccesses::accesses_t::iterator position) -> bool {
+				DataAccess *dataAccess = &(*position);
+				assert(dataAccess != nullptr);
+
+				std::cout << *dataAccess << std::endl;
+
+				const MemoryPlace *oldLocation = nullptr;
+				const MemoryPlace *newLocation = nullptr;
+
+				assert(oldLocation != nullptr);
+				const nanos6_device_t accessDeviceType = dataAccess->getLocation()->getType();
+
+				const DataAccessRegion &region = dataAccess->getAccessRegion();
+
+				if (accessDeviceType == nanos6_cluster_device) {
+
+					// By default we don't migrate the accesses
+					oldLocation = dataAccess->getLocation();
+					newLocation = dataAccess->getLocation();
+
+					const ClusterMemoryNode *oldClusterLocation
+						= dynamic_cast<const ClusterMemoryNode*>(oldLocation);
+
+					assert(oldClusterLocation != nullptr);
+					assert(oldClusterLocation != thisLocation);
+					assert(oldClusterLocation->getCommIndex() < ClusterManager::clusterSize());
+
+					if (oldClusterLocation->getCommIndex() >= expectedSize) {
+						// Come here only if the current location will die after shrinking; so the
+						// policy to migrate can be implemented inside this scope.
+
+						std::vector<size_t> bytes((size_t)expectedSize);
+						const Directory::HomeNodesArray *homeNodes = Directory::find(region);
+
+						// The current policy is to find all the new home nodes and try to find the
+						// one containing the bigger region and move there the whole region.
+						for (const auto &entry : *homeNodes) {
+							const MemoryPlace *location = entry->getHomeNode();
+							assert(location->getType() == nanos6_host_device);
+
+							// New location should be in the expected size range.
+							const size_t homeNodeId = location->getIndex();
+							assert(homeNodeId < (size_t)expectedSize);
+
+							const DataAccessRegion subregion = region.intersect(entry->getAccessRegion());
+							assert(subregion.getSize() != 0);
+							bytes[homeNodeId] += subregion.getSize();
+						}
+						delete homeNodes;
+
+						const size_t destinationIndex
+							= std::distance(bytes.begin(), std::max_element(bytes.begin(), bytes.end()));
+
+						newLocation = ClusterManager::getMemoryNode(destinationIndex);
+
+						dataAccess->setLocation(newLocation);
+					}
+				} else if (accessDeviceType == nanos6_host_device) {
+					if (VirtualMemoryManagement::isDistributedRegion(region)) {
+						// This information is only for the madvise purposes. Because the accesses
+						// on root never need to migrate.
+						oldLocation = thisLocation;
+						newLocation = thisLocation;
+					}
+
+				} else {
+					FatalErrorHandler::fail(
+						"Access of type: ", accessDeviceType, " is unsupported for malleability."
+					);
+				}
+
+				if (oldLocation != nullptr) {
+					// oldLocation is set only for the accesses we want to share. The other accesses
+					// are ignored.
+					MessageShrinkDataInfo shrinkInfo = {
+						.region = region,
+						.oldLocationIdx = oldLocation->getIndex(),
+						.newLocationIdx = newLocation->getIndex(),
+						.writeId = dataAccess->getWriteID(),
+						.tag = tag++
+					};
+
+					shrinkDataInfo.push_back(shrinkInfo);
+				}
+
+				return true; // continue, to process all access fragments
+			});
+
+		MessageShrink msgShrink(delta, shrinkDataInfo);
+
 		ClusterManager::sendMessageToAll(&msgShrink, true);
 
 		__attribute__((unused)) const int newSize = ClusterManager::nanos6Shrink(&msgShrink);

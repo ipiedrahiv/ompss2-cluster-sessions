@@ -146,6 +146,12 @@ public:
 	{
 		return _instrumentationRank;
 	}
+
+	friend std::ostream& operator<<(std::ostream& out, const ClusterNode& in)
+	{
+		out << "Node:" << in._index << "[" << in._commIndex << "]";
+		return out;
+	}
 };
 
 

@@ -24,7 +24,10 @@ struct MessageSpawnHostInfo {
 struct MessageShrinkDataInfo {
 	static constexpr MessageType messageType = SHRINK;
 	DataAccessRegion region;
-	int locationIdx;
+	int oldLocationIdx;
+	int newLocationIdx;
+	WriteID writeId;
+	int tag;
 };
 
 template<typename T>
