@@ -437,6 +437,7 @@ int ClusterManager::nanos6Spawn(const MessageSpawn *msg_spawn)
 			// queue for this message.
 			// We could also make the setMessengerData to have a list
 			DataAccessRegion init_region((void *)&_singleton->_dataInit, sizeof(DataInitSpawn));
+
 			for (int i = lastSize; i < newSize; ++i) {
 
 				ClusterNode *target = ClusterManager::getClusterNode(i);
@@ -444,16 +445,22 @@ int ClusterManager::nanos6Spawn(const MessageSpawn *msg_spawn)
 				assert(target->getMemoryNode() != nullptr);
 
 				ClusterManager::sendDataRaw(init_region, target->getMemoryNode(), 1, true);
+
+				// After the init we need to send the rest of the spawn to the new processes created
+				// in this iteration, so we can continue to the next iteration.
 				if (msg_spawn_i != nullptr) {
 					ClusterManager::sendMessage(msg_spawn_i, target, true);
 				}
+
 			}
 			delete msg_spawn_i;
 		}
 	}
-	assert(newSize == oldSize + delta);
 
 	const int newIndex = _singleton->_msn->getNodeIndex();
+	assert(newIndex == oldIndex);         // In the current implementation the index never changes.
+	assert(newSize == oldSize + delta);
+
 	MessageId::reset(newIndex, newSize);
 	WriteIDManager::reset(newIndex, newSize);
 	OffloadedTaskIdManager::reset(newIndex, newSize);
@@ -495,7 +502,6 @@ int ClusterManager::nanos6Shrink(const MessageShrink *msg_shrink)
 		// the all the data transfers in a non blocking way (otherwise an evident deadlock will be
 		// created). All this needs to be done BEFORE the shrink, so it will be executed over the
 		// initial communicator.
-
 		const MessageShrinkDataInfo &info = dataInfos[i];
 
 		if (info.oldLocationIdx != info.newLocationIdx) {
@@ -526,8 +532,7 @@ int ClusterManager::nanos6Shrink(const MessageShrink *msg_shrink)
 			// cleanup regions based on writeId.
 		}
 	}
-
-	ClusterManager::waitAllCompletion(transferList);
+	ClusterManager::waitAllCompletion(transferList); // Block wait all the transfers finish
 
 	// messenger calls spawn and merge, returns zero on the dying nodes.
 	const int newSize = _singleton->_msn->messengerShrink(delta);
@@ -624,13 +629,30 @@ int ClusterManager::nanos6Resize(int delta)
 
 		// Master sends spawn messages to all the OLD world
 		MessageSpawn msgSpawn(delta, hostInfos);
-
 		ClusterManager::sendMessageToAll(&msgSpawn, true);
 
 		// this is the same call that message handler does. So any improvement in resize will be
 		// done in nanos6Spawn not here because that will be executed by all the processes.
-		__attribute__((unused)) const int newSize = ClusterManager::nanos6Spawn(&msgSpawn);
-		assert(newSize == expectedSize);
+		const int newSize = ClusterManager::nanos6Spawn(&msgSpawn);
+
+		FatalErrorHandler::failIf(
+			newSize != expectedSize,
+			"Couldn't spawn ", expectedSize, " new processes; only ", newSize, " were created;"
+		);
+
+		// Share the existing dmallocs with the new processes.
+		const ClusterMemoryManagement::dmalloc_container_t &mallocsList
+			= ClusterMemoryManagement::getMallocsList();
+
+		if (mallocsList.size() > 0) {
+			MessageDmalloc msgDmallocInfo(mallocsList);
+
+			for (size_t i = oldSize; i < (size_t)newSize; ++i) {
+				ClusterNode *target = ClusterManager::getClusterNode(i);
+				ClusterManager::sendMessage(&msgDmallocInfo, target, true);
+			}
+		}
+
 
 	} else if (delta < 0) {
 
@@ -662,7 +684,6 @@ int ClusterManager::nanos6Resize(int delta)
 				const MemoryPlace *oldLocation = nullptr;
 				const MemoryPlace *newLocation = nullptr;
 
-				assert(oldLocation != nullptr);
 				const nanos6_device_t accessDeviceType = dataAccess->getLocation()->getType();
 
 				const DataAccessRegion &region = dataAccess->getAccessRegion();
@@ -732,7 +753,7 @@ int ClusterManager::nanos6Resize(int delta)
 						.oldLocationIdx = oldLocation->getIndex(),
 						.newLocationIdx = newLocation->getIndex(),
 						.writeId = dataAccess->getWriteID(),
-						.tag = tag++
+						.tag = tag++  // TODO: Get the right tag here...
 					};
 
 					shrinkDataInfo.push_back(shrinkInfo);

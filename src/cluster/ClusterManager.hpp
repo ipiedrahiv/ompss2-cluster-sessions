@@ -16,9 +16,10 @@
 #include "cluster/messenger/TransferBase.hpp"
 #include "cluster/messenger/Messenger.hpp"
 #include "cluster/messenger/DataTransfer.hpp"
-#include "cluster/messages/MessageResize.hpp"
 
 #include <ClusterNode.hpp>
+#include <MessageDmalloc.hpp>
+#include <MessageResize.hpp>
 #include <MessageDataFetch.hpp>
 #include <MessageDataSend.hpp>
 #include <ClusterShutdownCallback.hpp>
@@ -99,8 +100,8 @@ public:
 	//!
 	//! \param[in] Number of desired new nodes
 	//! \returns On success returns delta.
-	static int nanos6Spawn(const MessageSpawn *msg_spawn);
-	static int nanos6Shrink(const MessageShrink *msg_shrink);
+	static int nanos6Spawn(const MessageSpawn *msgSpawn);
+	static int nanos6Shrink(const MessageShrink *msgShrink);
 
 	//! \brief Initialize the ClusterManager
 	//! This is called before initializing the memory allocator because it collects some

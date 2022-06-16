@@ -99,8 +99,11 @@ void ClusterMemoryManagement::handleDmallocMessage(const MessageDmalloc *msg, Ta
 		ClusterMemoryManagement::_singleton.registerDmalloc(dataInfo, task, dataInfo->_clusterSize);
 	}
 
-	//! Synchronize across all nodes
-	ClusterManager::synchronizeAll();
+	if (msg->getType() == DMALLOC) {
+		//! Synchronize across all nodes only for new DMALLOC. DMALLOC_INFO is intended to be used
+		//! at the very beginning on spawned processes, and no synchronization is required.
+		ClusterManager::synchronizeAll();
+	}
 }
 
 

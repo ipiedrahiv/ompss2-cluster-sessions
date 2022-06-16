@@ -64,6 +64,7 @@ namespace ClusterPollingServices {
 		{
 			switch(msg->getType()) {
 				case DMALLOC:
+				case DMALLOC_INFO:
 				case DFREE:
 				case DATA_FETCH:
 				case DATA_SEND: // Not sure whether worth offloading to workers as just an MPI call
@@ -170,6 +171,7 @@ namespace ClusterPollingServices {
 			switch (msg->getType()) {
 				case SYS_FINISH:
 				case DMALLOC:
+				case DMALLOC_INFO:
 				case DFREE:
 				case DATA_FETCH:
 				case DATA_SEND:

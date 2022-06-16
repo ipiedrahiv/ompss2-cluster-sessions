@@ -32,11 +32,13 @@ MessageDmalloc::MessageDmalloc(
 }
 
 MessageDmalloc::MessageDmalloc(const ClusterMemoryManagement::dmalloc_container_t &dmallocs)
-	: Message(DMALLOC,
+	: Message(DMALLOC_INFO,
 		sizeof(size_t)
 		+ dmallocs.size() * sizeof(size_t)
 		+ ClusterMemoryManagement::getSerializedDmallocsSize())
 {
+	assert(dmallocs.size() > 0);
+
 	_content = reinterpret_cast<DmallocMessageContent *>(_deliverable->payload);
 	_content->_ndmallocs = dmallocs.size();
 
@@ -97,3 +99,5 @@ bool MessageDmalloc::handleMessage()
 
 static const bool __attribute__((unused))_registered_dmalloc =
 	Message::RegisterMSGClass<MessageDmalloc>(DMALLOC);
+static const bool __attribute__((unused))_registered_dmalloc_info =
+	Message::RegisterMSGClass<MessageDmalloc>(DMALLOC_INFO);

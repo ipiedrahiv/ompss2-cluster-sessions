@@ -148,7 +148,7 @@ void SpawnFunction::spawnFunction(
 		_pendingSpawnedFunctions++;
 	}
 
-#ifdef EXTRAE_ENABLED
+#if defined(EXTRAE_ENABLED) || ! defined(NDEBUG)
 	if (label != nullptr && strcmp(label, "main") == 0) {
 		task->markAsMainTask();
 	}
