@@ -7,8 +7,8 @@
 #ifndef MESSAGE_RESIZE_HPP
 #define MESSAGE_RESIZE_HPP
 
-#include "Message.hpp"
- #include <unistd.h>
+#include <unistd.h>
+#include <Message.hpp>
 
 struct MessageSpawnHostInfo {
 	static constexpr MessageType messageType = SPAWN;
@@ -30,7 +30,7 @@ struct MessageShrinkDataInfo {
 	int tag;
 };
 
-template<typename T>
+template <typename T>
 class MessageResize : public Message {
 
 	struct ResizeMessageContent {
@@ -60,16 +60,12 @@ public:
 	{
 	}
 
-
-	MessageResize(Deliverable *dlv)
-		: Message(dlv),
+	MessageResize(Deliverable *dlv) : Message(dlv),
 		  _content(reinterpret_cast<ResizeMessageContent *>(_deliverable->payload))
 	{
 		assert(_content != nullptr);
 		assert(_content->_deltaNodes != 0);
 	}
-
-	bool handleMessage();
 
 	int getDeltaNodes() const
 	{
@@ -93,10 +89,17 @@ public:
 		return ss.str();
 	}
 
+	bool handleMessage() override;
+	bool handleMessageNamespace() override;
 };
 
 typedef MessageResize<MessageSpawnHostInfo> MessageSpawn;
 typedef MessageResize<MessageShrinkDataInfo> MessageShrink;
 
+static const bool __attribute__((unused))_registered_spawn =
+	Message::RegisterMSGClass<MessageSpawn>(SPAWN);
+
+static const bool __attribute__((unused))_registered_shrink =
+	Message::RegisterMSGClass<MessageShrink>(SHRINK);
 
 #endif // MESSAGE_RESIZE_HPP

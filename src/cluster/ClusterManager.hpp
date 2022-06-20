@@ -13,16 +13,12 @@
 #include <vector>
 #include <type_traits>
 
-#include "cluster/messenger/TransferBase.hpp"
-#include "cluster/messenger/Messenger.hpp"
-#include "cluster/messenger/DataTransfer.hpp"
+#include "messages/MessageResize.hpp"
+#include "messenger/TransferBase.hpp"
+#include "messenger/Messenger.hpp"
+#include "messenger/DataTransfer.hpp"
 
 #include <ClusterNode.hpp>
-#include <MessageDmalloc.hpp>
-#include <MessageResize.hpp>
-#include <MessageDataFetch.hpp>
-#include <MessageDataSend.hpp>
-#include <ClusterShutdownCallback.hpp>
 #include "memory/directory/Directory.hpp"
 
 namespace ExecutionWorkflow
@@ -100,8 +96,8 @@ public:
 	//!
 	//! \param[in] Number of desired new nodes
 	//! \returns On success returns delta.
-	static int nanos6Spawn(const MessageSpawn *msgSpawn);
-	static int nanos6Shrink(const MessageShrink *msgShrink);
+	static int handleResizeMessage(const MessageSpawn *msgSpawn);
+	static int handleResizeMessage(const MessageShrink *msgShrink);
 
 	//! \brief Initialize the ClusterManager
 	//! This is called before initializing the memory allocator because it collects some

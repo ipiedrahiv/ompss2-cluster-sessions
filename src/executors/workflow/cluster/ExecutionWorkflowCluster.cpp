@@ -20,6 +20,8 @@
 #include "InstrumentCluster.hpp"
 #include "LiveDataTransfers.hpp"
 
+#include <cluster/messages/MessageId.hpp>
+
 namespace ExecutionWorkflow {
 
 	static inline TaskOffloading::DataSendRegionInfo handleEagerSend(

@@ -26,6 +26,7 @@
 #include <MessageTaskNew.hpp>
 #include "MessageSatisfiability.hpp"
 #include <MessageAccessInfo.hpp>
+#include <MessageDataSend.hpp>
 #include <NodeNamespace.hpp>
 
 #include "cluster/WriteID.hpp"

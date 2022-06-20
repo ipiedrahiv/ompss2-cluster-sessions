@@ -12,6 +12,8 @@
 #include "messages/MessageSysFinish.hpp"
 #include "messages/MessageDataFetch.hpp"
 #include "messages/MessageResize.hpp"
+#include "messages/MessageResizeImplementation.hpp"
+#include "messages/MessageDmalloc.hpp"
 
 #include "messenger/Messenger.hpp"
 #include "polling-services/ClusterServicesPolling.hpp"
@@ -349,23 +351,22 @@ void ClusterManager::fetchVector(
 
 		const std::vector<ExecutionWorkflow::FragmentInfo> &fragments = step->getFragments();
 
-		for (__attribute__((unused)) ExecutionWorkflow::FragmentInfo const &fragment : fragments) {
+		for (ExecutionWorkflow::FragmentInfo const &fragment : fragments) {
 			assert(index < nFragments);
 			assert(content->_remoteRegionInfo[index]._remoteRegion == fragment._region);
 			temporal[index] = fragment._dataTransfer;
-
 			++index;
 		}
 	}
 
 	assert(index == nFragments);
-
 	ClusterPollingServices::PendingQueue<DataTransfer>::addPendingVector(temporal);
 
 	_singleton->_msn->sendMessage(msg, remoteNode);
 }
 
-int ClusterManager::nanos6Spawn(const MessageSpawn *msg_spawn)
+// SPAWN
+int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo> *msgSpawn)
 {
 	assert(_singleton != nullptr);
 	assert(_singleton->_msn != nullptr);
@@ -376,13 +377,13 @@ int ClusterManager::nanos6Spawn(const MessageSpawn *msg_spawn)
 
 	// Stop polling services.
 	if (oldSize > 1) {
-		ClusterServicesTask::setPauseStatus(true);
-		ClusterServicesPolling::setPauseStatus(true);
+		ClusterServicesPolling::shutdown();
+		ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
 	}
 
-	const int delta = msg_spawn->getDeltaNodes();
+	const int delta = msgSpawn->getDeltaNodes();
 	assert(delta > 0);
-	const size_t nEntries = msg_spawn->getNEntries();
+	const size_t nEntries = msgSpawn->getNEntries();
 
 	int spawned = 0;
 	for (size_t ent = 0; ent < nEntries; ++ent) {
@@ -391,7 +392,7 @@ int ClusterManager::nanos6Spawn(const MessageSpawn *msg_spawn)
 		// spawn also in case they are created as intermediate processes.  This method is the only
 		// one fully compatible with all the mpi implementations and with the efficiency of
 		// performing everything with a minimal number of messages.
-		const MessageSpawnHostInfo &info = msg_spawn->getEntries()[ent];
+		const MessageSpawnHostInfo &info = msgSpawn->getEntries()[ent];
 
 		const std::string hostname(info.hostname);
 		const size_t nprocs = info.nprocs;
@@ -417,7 +418,7 @@ int ClusterManager::nanos6Spawn(const MessageSpawn *msg_spawn)
 			// message to inform the new processes that the spawn is not finished because the
 			// ClusterManager::sendDataRaw and its counter part expect a fixed size message and the
 			// polling services on the new nodes are not running yet either.
-			MessageSpawn *msg_spawn_i = nullptr;
+			MessageSpawn *msgSpawn_i = nullptr;
 
 			// create a temporal message with spawn instructions from ent + 1 -> nEntries for the
 			// new processes created in this iteration only.
@@ -426,8 +427,8 @@ int ClusterManager::nanos6Spawn(const MessageSpawn *msg_spawn)
 			assert(pending >= 0);         // We never spawn more processes than delta
 			if (nextEnt < nEntries) {
 				assert(pending > 0);      // We still have processes to spawn
-				msg_spawn_i = new MessageSpawn(
-					pending, nEntries - nextEnt, &msg_spawn->getEntries()[nextEnt]
+				msgSpawn_i = new MessageSpawn(
+					pending, nEntries - nextEnt, &msgSpawn->getEntries()[nextEnt]
 				);
 			}
 
@@ -448,12 +449,12 @@ int ClusterManager::nanos6Spawn(const MessageSpawn *msg_spawn)
 
 				// After the init we need to send the rest of the spawn to the new processes created
 				// in this iteration, so we can continue to the next iteration.
-				if (msg_spawn_i != nullptr) {
-					ClusterManager::sendMessage(msg_spawn_i, target, true);
+				if (msgSpawn_i != nullptr) {
+					ClusterManager::sendMessage(msgSpawn_i, target, true);
 				}
 
 			}
-			delete msg_spawn_i;
+			delete msgSpawn_i;
 		}
 	}
 
@@ -465,24 +466,24 @@ int ClusterManager::nanos6Spawn(const MessageSpawn *msg_spawn)
 	WriteIDManager::reset(newIndex, newSize);
 	OffloadedTaskIdManager::reset(newIndex, newSize);
 
-	if (oldSize == 1) { // When we started with a single node polling services didn't start.
+	if (newSize > 1) { // When we started with a single node polling services didn't start.
 		ClusterServicesPolling::initialize();
 		ClusterServicesTask::initializeWorkers(_singleton->_numMessageHandlerWorkers);
-	} else {            // Restart the polling services
-		assert(oldSize > 1);
-		ClusterServicesPolling::setPauseStatus(false);
-		ClusterServicesTask::setPauseStatus(false);
 	}
 
 	return newSize;
 }
 
-int ClusterManager::nanos6Shrink(const MessageShrink *msg_shrink)
+// SHRINK
+int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInfo> *msgShrink)
 {
 	assert(_singleton != nullptr);
 	assert(_singleton->_msn != nullptr);
 
-	const int delta = msg_shrink->getDeltaNodes();
+	ClusterServicesPolling::shutdown();
+	ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
+
+	const int delta = msgShrink->getDeltaNodes();
 	assert(delta < 0);
 
 	// Index actually never changes, only size. We prefix these OLD meaning that it was obtained
@@ -493,10 +494,10 @@ int ClusterManager::nanos6Shrink(const MessageShrink *msg_shrink)
 	ClusterServicesTask::setPauseStatus(true);
 	ClusterServicesPolling::setPauseStatus(true);
 
-	const MessageShrinkDataInfo *dataInfos = msg_shrink->getEntries();
+	const MessageShrinkDataInfo *dataInfos = msgShrink->getEntries();
 	std::vector<DataTransfer *> transferList;
 
-	for (size_t i = 0; i < msg_shrink->getNEntries(); ++i) {
+	for (size_t i = 0; i < msgShrink->getNEntries(); ++i) {
 		// When we receive the message, the first we need to do is to process all the transfers.
 		// When a transfer is required and the process is involved (source or target) then we create
 		// the all the data transfers in a non blocking way (otherwise an evident deadlock will be
@@ -561,13 +562,9 @@ int ClusterManager::nanos6Shrink(const MessageShrink *msg_shrink)
 		msg.handleMessage();
 	}
 
-	if (newSize == 1) { // When we started with a single node polling services didn't start.
-		ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
-		ClusterServicesPolling::shutdown();
-	} else {            // Restart the polling services
-		//assert(newSize > 1);
-		ClusterServicesPolling::setPauseStatus(false);
-		ClusterServicesTask::setPauseStatus(false);
+	if (newSize > 1) { // When we started with a single node polling services didn't start.
+		ClusterServicesPolling::initialize();
+		ClusterServicesTask::initializeWorkers(_singleton->_numMessageHandlerWorkers);
 	}
 
 	return newSize;
@@ -633,7 +630,7 @@ int ClusterManager::nanos6Resize(int delta)
 
 		// this is the same call that message handler does. So any improvement in resize will be
 		// done in nanos6Spawn not here because that will be executed by all the processes.
-		const int newSize = ClusterManager::nanos6Spawn(&msgSpawn);
+		const int newSize = ClusterManager::handleResizeMessage(&msgSpawn);
 
 		FatalErrorHandler::failIf(
 			newSize != expectedSize,
@@ -662,6 +659,11 @@ int ClusterManager::nanos6Resize(int delta)
 		WorkerThread *currentThread = WorkerThread::getCurrentWorkerThread();
 		assert(currentThread != nullptr);
 
+		// We need the stack region for some defensive code.
+		size_t stackSize;
+		void *stackPtr = currentThread->getStackAndSize(/* OUT */ stackSize);
+		DataAccessRegion stackRegion(stackPtr, stackSize);
+
 		Task *currentTask = currentThread->getTask();
 		assert(currentTask != nullptr);
 		assert(currentTask->isMainTask());
@@ -684,22 +686,25 @@ int ClusterManager::nanos6Resize(int delta)
 				const MemoryPlace *oldLocation = nullptr;
 				const MemoryPlace *newLocation = nullptr;
 
-				const nanos6_device_t accessDeviceType = dataAccess->getLocation()->getType();
+				const MemoryPlace *accessLocation = dataAccess->getLocation();
+				assert(accessLocation != nullptr);
 
 				const DataAccessRegion &region = dataAccess->getAccessRegion();
+				assert(!region.empty());
+
+				const nanos6_device_t accessDeviceType = accessLocation->getType();
 
 				if (accessDeviceType == nanos6_cluster_device) {
 
 					// By default we don't migrate the accesses
-					oldLocation = dataAccess->getLocation();
-					newLocation = dataAccess->getLocation();
+					oldLocation = accessLocation;
+					newLocation = accessLocation;
 
 					const ClusterMemoryNode *oldClusterLocation
 						= dynamic_cast<const ClusterMemoryNode*>(oldLocation);
 
 					assert(oldClusterLocation != nullptr);
-					assert(oldClusterLocation != thisLocation);
-					assert(oldClusterLocation->getCommIndex() < ClusterManager::clusterSize());
+					assert(oldClusterLocation->getCommIndex() < oldSize);
 
 					if (oldClusterLocation->getCommIndex() >= expectedSize) {
 						// Come here only if the current location will die after shrinking; so the
@@ -766,7 +771,8 @@ int ClusterManager::nanos6Resize(int delta)
 
 		ClusterManager::sendMessageToAll(&msgShrink, true);
 
-		__attribute__((unused)) const int newSize = ClusterManager::nanos6Shrink(&msgShrink);
+		__attribute__((unused)) const int newSize
+			= ClusterManager::handleResizeMessage(&msgShrink);
 		assert(newSize == expectedSize || newSize == 0); // zero for dying nodes
 	}
 

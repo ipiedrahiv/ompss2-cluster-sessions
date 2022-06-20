@@ -244,6 +244,13 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 			// When there is not parent this is part of the initial communicator.
 			ret = MPI_Comm_dup(MPI_COMM_WORLD, &INTRA_COMM);
 			MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
+
+			char commname[MPI_MAX_OBJECT_NAME];
+			snprintf(commname, MPI_MAX_OBJECT_NAME - 1, "INTRA_WORLD_%s",
+				(PARENT_COMM != MPI_COMM_NULL ? "spawned" : "nospawned"));
+
+			ret = MPI_Comm_set_name(INTRA_COMM, commname);
+			MPIErrorHandler::handle(ret, INTRA_COMM);
 		}
 	} else {
 		FatalErrorHandler::failIf(
@@ -278,7 +285,7 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 
 	if (_mpi_comm_data_raw) {
 		ret = MPI_Comm_dup(INTRA_COMM, &INTRA_COMM_DATA_RAW);
-		MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
+		MPIErrorHandler::handle(ret, INTRA_COMM_DATA_RAW);
 	} else {
 		INTRA_COMM_DATA_RAW = INTRA_COMM;
 	}
@@ -585,7 +592,7 @@ Message *MPIMessenger::checkMail(void)
 	Instrument::MPILock();
 	ret = MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, INTRA_COMM, &flag, &status);
 	Instrument::MPIUnLock();
-	MPIErrorHandler::handle(ret, INTRA_COMM);
+	MPIErrorHandler::handle(ret, INTRA_COMM, "Pooling MPI_Iprobe");
 
 	if (!flag) {
 		return nullptr;
@@ -773,6 +780,12 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 	messengerReinitialize(false);
 	assert(_wsize == oldsize + delta);                       // New size needs to be bigger
 
+	char commname[MPI_MAX_OBJECT_NAME];
+	snprintf(commname, MPI_MAX_OBJECT_NAME - 1, "INTRA_%d_%d", _wrank, _wsize);
+
+	ret = MPI_Comm_set_name(INTRA_COMM, commname);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+
 	return _wsize;
 }
 
@@ -796,7 +809,7 @@ int MPIMessenger::messengerShrink(int delta)
 			MPI_Status status;
 
 			ret = MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, INTRA_COMM, &flag, &status);
-			MPIErrorHandler::handle(ret, INTRA_COMM);
+			MPIErrorHandler::handle(ret, INTRA_COMM, "Debug MPI_Iprobe");
 
 			FatalErrorHandler::failIf(flag,
 				"Pending messages in a communicator that will be removed: type ",

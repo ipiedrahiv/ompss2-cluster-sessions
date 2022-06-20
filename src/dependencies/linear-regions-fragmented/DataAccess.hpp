@@ -35,8 +35,6 @@
 #include "cluster/offloading/OffloadedTaskId.hpp"
 #include "cluster/ClusterManager.hpp"
 
-
-struct DataAccess;
 class Task;
 class MemoryPlace;
 

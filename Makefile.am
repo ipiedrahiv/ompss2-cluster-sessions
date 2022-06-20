@@ -478,7 +478,6 @@ cluster_sources += \
 	src/cluster/messages/MessageReleaseAccess.cpp \
 	src/cluster/messages/MessageSatisfiability.cpp \
 	src/cluster/messages/MessageTaskNew.cpp \
-	src/cluster/messages/MessageResize.cpp \
 	src/cluster/messenger/LiveDataTransfers.cpp \
 	src/cluster/messenger/mpi/MPIMessenger.cpp \
 	src/cluster/offloading/TaskOffloading.cpp \
@@ -1375,6 +1374,7 @@ noinst_HEADERS += \
 	src/cluster/messages/MessageTaskNew.hpp \
 	src/cluster/messenger/TransferBase.hpp \
 	src/cluster/messages/MessageResize.hpp \
+	src/cluster/messages/MessageResizeImplementation.hpp \
 	src/cluster/messenger/DataTransfer.hpp \
 	src/cluster/messenger/LiveDataTransfers.hpp \
 	src/cluster/messenger/Messenger.hpp \
