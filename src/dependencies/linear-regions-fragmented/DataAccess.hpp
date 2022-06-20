@@ -984,7 +984,12 @@ public:
 
 	friend std::ostream& operator<<(std::ostream& out, const DataAccess& access)
 	{
-		out << access._region << " id: " << access._writeID << " loc: " << *access._location;
+		out << access._region << " id: " << access._writeID;
+		if (access._location != nullptr) {
+			out  << " loc: " << *access._location;
+		} else {
+			out  << " loc: null";
+		}
 		return out;
 	}
 
