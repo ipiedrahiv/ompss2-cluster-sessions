@@ -18,14 +18,11 @@ class ClusterServicesPolling {
 
 	// Defined in ClusterManager.cpp
 	static std::atomic<size_t> _activeClusterPollingServices;
-	static std::atomic<bool> _pausedServices;
 
 	template <typename T>
 	static int bodyClusterService(__attribute__((unused)) void *args)
 	{
-		if (!_pausedServices.load()) {
-			T::executeService(); // This returns true unless the service is unregistered
-		}
+		T::executeService(); // This returns true unless the service is unregistered
 		return 0;
 	}
 
@@ -52,6 +49,11 @@ class ClusterServicesPolling {
 	}
 
 public:
+
+	inline static int count()
+	{
+		return _activeClusterPollingServices;
+	}
 
 	//! \brief Initialize the Cluster polling services
 	//!
@@ -83,14 +85,6 @@ public:
 		ClusterPollingServices::PendingQueue<DataTransfer>::waitUntilFinished();
 	}
 
-	inline static void setPauseStatus(bool pause)
-	{
-		if (pause) {
-			ClusterPollingServices::MessageHandler<Message>::waitUntilFinished();
-		}
-		_pausedServices.store(pause);
-	}
-
 	//! \brief Shutdown the Cluster polling services-
 	//!
 	//! This method will be called during ClusterManager shutdown.
@@ -102,8 +96,6 @@ public:
 			|| ClusterManager::getInitData().clusterMalleabilityEnabled());
 		assert(MemoryAllocator::isInitialized());
 		assert(_activeClusterPollingServices.load() > 0);
-
-		setPauseStatus(false);
 
 		if (!hybridOnly) {
 			// Occasionally a slave node receives the MessageSysFinish and starts

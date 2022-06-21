@@ -51,10 +51,7 @@ WriteIDManager *WriteIDManager::_singleton = nullptr;
 OffloadedTaskIdManager *OffloadedTaskIdManager::_singleton = nullptr;
 
 std::atomic<size_t> ClusterServicesPolling::_activeClusterPollingServices(0);
-std::atomic<bool> ClusterServicesPolling::_pausedServices(false);
-
 std::atomic<size_t> ClusterServicesTask::_activeClusterTaskServices(0);
-std::atomic<bool> ClusterServicesTask::_pausedServices(false);
 
 ClusterManager::ClusterManager()
 	: _clusterRequested(false),
@@ -315,9 +312,13 @@ void ClusterManager::shutdownPhase1()
 	}
 
 	if (ClusterManager::inClusterMode()) {
-		ClusterServicesPolling::shutdown();
+		if (ClusterServicesPolling::count() > 0) {
+			ClusterServicesPolling::shutdown();
+		}
 
-		ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
+		if (ClusterServicesTask::count() > 0) {
+			ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
+		}
 
 		TaskOffloading::RemoteTasksInfoMap::shutdown();
 		TaskOffloading::OffloadedTasksInfoMap::shutdown();
@@ -325,6 +326,8 @@ void ClusterManager::shutdownPhase1()
 #if HAVE_DLB
 		ClusterServicesPolling::shutdown(/* hybridOnly */ true);
 #endif
+		assert(ClusterServicesPolling::count() == 0);
+		assert(ClusterServicesTask::count() == 0);
 	}
 
 	if (_singleton->_msn != nullptr) {
@@ -519,9 +522,6 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 	// BEFORE any resize step.
 	const int oldIndex = _singleton->_msn->getNodeIndex();
 	const int oldSize = ClusterManager::clusterSize();
-
-	ClusterServicesTask::setPauseStatus(true);
-	ClusterServicesPolling::setPauseStatus(true);
 
 	const MessageShrinkDataInfo *dataInfos = msgShrink->getEntries();
 	std::vector<DataTransfer *> transferList;
