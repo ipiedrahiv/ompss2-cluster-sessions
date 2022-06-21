@@ -78,14 +78,6 @@ public:
 		_singleton = nullptr;
 	}
 
-
-	inline static void reset(__attribute__((unused)) int rank, int numRanks)
-	{
-		assert(_singleton != nullptr);
-		assert(_singleton->_rank == rank);
-		_singleton->_numRanks = numRanks;
-	}
-
 	//! \brief Get the next available MessageId
 	//!
 	//! \param[in] numIds The number of Ids to allocate.

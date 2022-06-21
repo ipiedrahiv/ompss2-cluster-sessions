@@ -109,16 +109,6 @@ public:
 		assert(_singleton != nullptr);
 	}
 
-	static void reset(
-		__attribute__((unused)) int nodeIndex,
-		__attribute__((unused)) int clusterSize
-	) {
-		// The probability of collision is too high if a write ID has less than 64 bits
-		static_assert(sizeof(WriteID) >= 8, "WriteID size is wrong.");
-		assert(_singleton != nullptr);
-		assert(clusterSize < (1 << logMaxNodes));
-	}
-
 	static void finalize()
 	{
 		assert(_singleton != nullptr);
@@ -143,7 +133,9 @@ public:
 					// Region already in the map: update the writeID if it has changed
 					if (position->_writeID != id) {
 						if (!position->getAccessRegion().fullyContainedIn(region)) {
-							position = entry._regions.fragmentByIntersection(position, region, /* removeIntersection */ false);
+							position = entry._regions.fragmentByIntersection(
+								position, region, /* removeIntersection */ false
+							);
 						}
 						position->_writeID = id;
 					}

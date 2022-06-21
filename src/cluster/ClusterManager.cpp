@@ -86,13 +86,10 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 	const int indexThisPhysicalNode = _msn->getIndexThisPhysicalNode();
 	const int masterIndex = _msn->getMasterIndex();
 
-	MessageId::initialize(internalRank, clusterSize);
-	WriteIDManager::initialize(internalRank, clusterSize);
-	OffloadedTaskIdManager::initialize(internalRank, clusterSize);
-
 	const int numAppranks = _msn->getNumAppranks();
 	const bool inHybridMode = numAppranks > 1;
 
+	// Initialize the DLB stuff
 	const std::vector<int> &internalRankToExternalRank = _msn->getInternalRankToExternalRank();
 	const std::vector<int> &instanceThisNodeToExternalRank = _msn->getInstanceThisNodeToExternalRank();
 
@@ -100,7 +97,6 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 		inHybridMode, externalRank, apprankNum, internalRank, physicalNodeNum, indexThisPhysicalNode,
 		clusterSize, internalRankToExternalRank, instanceThisNodeToExternalRank
 	);
-
 
 	// Called from constructor the first time
 	this->_clusterNodes.resize(clusterSize);
@@ -114,6 +110,15 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 
 	assert(_thisNode != nullptr);
 	assert(_masterNode != nullptr);
+	assert(_thisNode->getCommIndex() == internalRank);
+
+	char hostname[HOST_NAME_MAX];
+	gethostname(hostname, HOST_NAME_MAX);
+	FatalErrorHandler::failIf(
+		gethostname(hostname, HOST_NAME_MAX) != 0,
+		"Rank:", internalRank, " couldn't get hostname."
+	);
+	_thisNode->setHostName(hostname);
 
 	ConfigVariable<bool> disableRemote("cluster.disable_remote");
 	_disableRemote = disableRemote.getValue();
@@ -142,30 +147,54 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 	ConfigVariable<int> numMessageHandlerWorkers("cluster.num_message_handler_workers");
 	_numMessageHandlerWorkers = numMessageHandlerWorkers.getValue();
 
+	ConfigVariable<int> numMaxNodes("cluster.num_max_nodes");
+	assert(numMaxNodes.getValue() >= 0);
+	const size_t clusterMaxSize
+		= ((size_t)numMaxNodes.getValue() > clusterSize ? numMaxNodes.getValue() : clusterSize);
+
+	MessageId::initialize(internalRank, clusterMaxSize);
+	WriteIDManager::initialize(internalRank, clusterMaxSize);
+	OffloadedTaskIdManager::initialize(internalRank, clusterMaxSize);
+
+
 #if HAVE_SLURM
 	if (_msn->isSpawned()) {
-		// We could use an if-else but this way it is more defensive to detect errors in other places.
 		assert(_thisNode != _masterNode);
 		_msn->synchronizeAll();
 
 		DataAccessRegion region(&_dataInit, sizeof(DataInitSpawn));
-		_msn->fetchData(region, _masterNode, 1, true, false);
+		_msn->fetchData(region, _masterNode, std::numeric_limits<int>::max(), true, false);
 	} else {
 		_dataInit._numMinNodes = clusterSize;
-		_dataInit._numMaxNodes = clusterSize;
+		_dataInit._numMaxNodes = clusterMaxSize;
 
-		ConfigVariable<int> numMaxNodes("cluster.num_max_nodes");
-		if (numMaxNodes.getValue() != 0) {
-			_dataInit._numMaxNodes = numMaxNodes.getValue();
-		}
+		if (_dataInit.clusterMalleabilityEnabled()) {
+			// We only share the hostnames when malleability is enabled, otherwise it is not needed.
+			if (_thisNode == _masterNode) {
 
-		if (_thisNode == _masterNode && _dataInit.clusterMalleabilityEnabled()) {
-			SlurmAPI::initialize();
+				for (ClusterNode *it: _clusterNodes) {
+					if (it == _thisNode) {
+						continue;          // This was already set unconditionally.
+					}
+
+					DataAccessRegion region(hostname, HOST_NAME_MAX * sizeof(char));
+					_msn->fetchData(region, it, it->getIndex(), true, false);
+					it->setHostName(hostname);
+				}
+
+				SlurmAPI::initialize(_clusterNodes);
+
+			} else {
+				// Share my hostname with master.
+				DataAccessRegion region(hostname, HOST_NAME_MAX * sizeof(char));
+				_singleton->_msn->sendData(region, _masterNode, _thisNode->getIndex(), true, false);
+			}
 		}
 	}
 #else // HAVE_SLURM
 	FatalErrorHandler::failIf(_msn->isSpawned(), "Can spawn process without malleability support.")
 #endif // HAVE_SLURM
+
 }
 
 ClusterManager::~ClusterManager()
@@ -445,7 +474,9 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 				assert(target != nullptr);
 				assert(target->getMemoryNode() != nullptr);
 
-				ClusterManager::sendDataRaw(init_region, target->getMemoryNode(), 1, true);
+				ClusterManager::sendDataRaw(
+					init_region, target->getMemoryNode(), std::numeric_limits<int>::max(), true
+				);
 
 				// After the init we need to send the rest of the spawn to the new processes created
 				// in this iteration, so we can continue to the next iteration.
@@ -459,12 +490,10 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 	}
 
 	const int newIndex = _singleton->_msn->getNodeIndex();
-	assert(newIndex == oldIndex);         // In the current implementation the index never changes.
-	assert(newSize == oldSize + delta);
+	FatalErrorHandler::failIf(newIndex != oldIndex,
+		"Index changed after spawn: ", oldIndex, " -> ", newIndex);
 
-	MessageId::reset(newIndex, newSize);
-	WriteIDManager::reset(newIndex, newSize);
-	OffloadedTaskIdManager::reset(newIndex, newSize);
+	assert(newSize == oldSize + delta);
 
 	if (newSize > 1) { // When we started with a single node polling services didn't start.
 		ClusterServicesPolling::initialize();
@@ -551,10 +580,6 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 		}
 		_singleton->_clusterNodes.resize(newSize);
 
-		MessageId::reset(newIndex, newSize);
-		WriteIDManager::reset(newIndex, newSize);
-		OffloadedTaskIdManager::reset(newIndex, newSize);
-
 		ClusterManager::synchronizeAll();
 
 	} else {           // newSize is zero when this is a dying rank.
@@ -577,7 +602,7 @@ int ClusterManager::nanos6Resize(int delta)
 	assert(ClusterManager::getInitData().clusterMalleabilityEnabled());
 	// There is more than one host... This will be corrected with multiple processes/node
 	assert(SlurmAPI::isEnabled());
-	assert(SlurmAPI::getHostnameVector().size() > 1);
+	assert(SlurmAPI::getHostInfoVector().size() > 1);
 
 	TaskWait::taskWait("nanos6Resize");
 
@@ -616,12 +641,13 @@ int ClusterManager::nanos6Resize(int delta)
 	}
 
 	if (delta > 0) {
-		assert((size_t)oldSize < SlurmAPI::getHostnameVector().size());
+		clusterPrintf("Spawning %d\n", delta);
+		assert((size_t)oldSize < SlurmAPI::getHostInfoVector().size());
 
 		// TODO: Any spawn policy to implement may be done here in the hostInfos.
 		std::vector<MessageSpawnHostInfo> hostInfos;
 		hostInfos.push_back(
-			MessageSpawnHostInfo(SlurmAPI::getHostnameVector()[oldSize].hostname, (size_t) delta)
+			MessageSpawnHostInfo(SlurmAPI::getHostInfoVector()[oldSize].hostname, (size_t) delta)
 		);
 
 		// Master sends spawn messages to all the OLD world

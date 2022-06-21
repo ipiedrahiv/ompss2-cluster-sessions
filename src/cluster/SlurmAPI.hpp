@@ -18,27 +18,61 @@ class SlurmAPI {
 
 	struct SlurmHostInfo {
 		std::string hostname;
-		size_t nprocesses;
+		size_t nProcesses;
+
+		void changeProcesses(int delta)
+		{
+			const int expected = nProcesses + delta;
+			assert(expected >= 0);
+			assert((size_t)expected <= getProcessesPerNode());
+			nProcesses = expected;
+		}
+
+		friend std::ostream &operator<<(std::ostream &out, const SlurmHostInfo &info)
+		{
+			out << "Host:" << info.hostname << "processes:" << info.nProcesses;
+			return out;
+		}
 	};
 
-	std::vector<SlurmHostInfo> _nodelist_vector;
-	const size_t _cpus_per_task, _cpus_per_node;
+	std::vector<SlurmHostInfo> _hostInfoVector;
+	const size_t _cpusPerTask, _cpusPerNode;
 
 	static SlurmAPI *_singleton;
+private:
+
+	std::vector<SlurmHostInfo>::iterator getHostinfoByHostname(std::string hostname)
+	{
+		std::vector<SlurmHostInfo>::iterator hostInfoIt
+			= std::find_if_not(   // The only one in C++-11
+				_hostInfoVector.begin(),
+				_hostInfoVector.end(),
+				[&](const SlurmHostInfo &hostInfo) -> bool {
+					return (hostInfo.hostname != hostname);
+				}
+			);
+
+		FatalErrorHandler::failIf(
+			hostInfoIt == _hostInfoVector.end(),
+			"Hostname: ", hostname, " is not in the HostnameList."
+		);
+
+		return hostInfoIt;
+	}
 
 public:
 	SlurmAPI()
-		: _cpus_per_task(EnvironmentVariable<size_t>("SLURM_CPUS_PER_TASK").getValue()),
-		  _cpus_per_node(EnvironmentVariable<size_t>("SLURM_CPUS_ON_NODE").getValue())
+		: _cpusPerTask(EnvironmentVariable<size_t>("SLURM_CPUS_PER_TASK").getValue()),
+		  _cpusPerNode(EnvironmentVariable<size_t>("SLURM_CPUS_ON_NODE").getValue())
 	{
-		assert(_cpus_per_task != _cpus_per_node);
+		assert(_cpusPerTask != _cpusPerNode);
 
 		const std::string nodelist = EnvironmentVariable<std::string>("SLURM_NODELIST").getValue();
 		FatalErrorHandler::failIf(nodelist.empty(), "Couldn't get SLURM_NODELIST.");
 
-		FatalErrorHandler::failIf(_cpus_per_task == 0, "Couldn't get SLURM_CPUS_PER_TASK.");
-		FatalErrorHandler::failIf(_cpus_per_node == 0, "Couldn't get SLURM_CPUS_ON_NODE.");
-		FatalErrorHandler::failIf(_cpus_per_node < _cpus_per_task,
+		FatalErrorHandler::failIf(_cpusPerTask == 0, "Couldn't get SLURM_CPUS_PER_TASK.");
+		FatalErrorHandler::failIf(_cpusPerNode == 0, "Couldn't get SLURM_CPUS_ON_NODE.");
+		FatalErrorHandler::failIf(_cpusPerNode < _cpusPerTask,
 			"Require more than one process per node.");
 
 		hostlist_t hostlist = slurm_hostlist_create(nodelist.c_str());
@@ -48,35 +82,35 @@ public:
 		// Initialize the node list.
 		char *host;
 		while ((host = slurm_hostlist_shift(hostlist))) {
-			SlurmHostInfo info = {.hostname = host, .nprocesses = 0};
-			_nodelist_vector.push_back(info);
+			SlurmHostInfo info = {.hostname = host, .nProcesses = 0};
+			_hostInfoVector.push_back(info);
 		}
 		slurm_hostlist_destroy(hostlist);
 
-		FatalErrorHandler::failIf(_nodelist_vector.empty(), "Error nodelist_vector is empty.");
-
-#ifndef NDEBUG
-		// Here the code can be to reorder the nodes on demand and check the nodes in use.
-		char this_hostname[HOST_NAME_MAX];
-
-		if (gethostname(this_hostname, HOST_NAME_MAX) == 0) {
-			// TODO: Instead of failing we should move this_hostname to the first position in the
-			// list As this function is used only on master, a more complete approach must be to use
-			// the SLURM_JOB_NODELIST environment variable and remove the elements.
-			FatalErrorHandler::failIf(
-				_nodelist_vector[0].hostname != std::string(this_hostname),
-				"The master's hostname is not the first in the list.");
-		} else {
-			FatalErrorHandler::warn("Couldn't get hostname to assert that the list is correct.");
-		}
-#endif // NDEBUG
+		FatalErrorHandler::failIf(_hostInfoVector.empty(), "Error nodelist_vector is empty.");
 	}
 
-	static void initialize()
+	static void initialize(std::vector<ClusterNode *> &mpiNodes)
 	{
 		assert(_singleton == nullptr);
 		_singleton = new SlurmAPI();
 		assert(_singleton != nullptr);
+
+		// Move the master Hostname to the first position.
+		// TODO: Not hardcode the 0, but use the master_index variable from cluster manager...
+		if (mpiNodes[0]->getHostName() != _singleton->_hostInfoVector[0].hostname) {
+			std::rotate(
+				_singleton->_hostInfoVector.begin(),
+				_singleton->getHostinfoByHostname(mpiNodes[0]->getHostName()),
+				_singleton->_hostInfoVector.end()
+			);
+		}
+
+		// TODO: If the number of hosts grows too much this search is complexity N, it may be
+		// useful to use a temporal map to reduce the search in getHostinfoByHostname to logN
+		for (ClusterNode *it : mpiNodes) {
+			SlurmAPI::deltaProcessToHostname(it->getHostName(), 1);
+		}
 	}
 
 	static void finalize()
@@ -91,30 +125,38 @@ public:
 		return _singleton != nullptr;
 	}
 
-	static const std::vector<SlurmHostInfo> &getHostnameVector()
+	static const std::vector<SlurmHostInfo> &getHostInfoVector()
 	{
 		assert(_singleton != nullptr);
-		return _singleton->_nodelist_vector;
+		return _singleton->_hostInfoVector;
 	}
 
 	static size_t getCpusPerTask()
 	{
 		assert(_singleton != nullptr);
-		return _singleton->_cpus_per_task;
+		return _singleton->_cpusPerTask;
 	}
 
 	static size_t getCpusPerNode()
 	{
 		assert(_singleton != nullptr);
-		return _singleton->_cpus_per_node;
+		return _singleton->_cpusPerNode;
 	}
 
 	static size_t getProcessesPerNode()
 	{
 		assert(_singleton != nullptr);
-		assert(_singleton->_cpus_per_node >= _singleton->_cpus_per_task);
-		return _singleton->_cpus_per_node / _singleton->_cpus_per_task;
+		assert(_singleton->_cpusPerNode >= _singleton->_cpusPerTask);
+		return _singleton->_cpusPerNode / _singleton->_cpusPerTask;
 	}
+
+	static void deltaProcessToHostname(std::string hostname, int delta)
+	{
+		assert(_singleton != nullptr);
+		std::vector<SlurmHostInfo>::iterator info = _singleton->getHostinfoByHostname(hostname);
+		info->changeProcesses(delta);
+	}
+
 };
 
 #endif // SLURMAPI_HPP
