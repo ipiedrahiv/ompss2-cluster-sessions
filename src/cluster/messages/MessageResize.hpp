@@ -26,7 +26,8 @@ struct MessageShrinkDataInfo {
 	DataAccessRegion region;
 	int oldLocationIdx;
 	int newLocationIdx;
-	WriteID writeId;
+	WriteID oldWriteId;
+	WriteID newWriteId;
 	int tag;
 };
 

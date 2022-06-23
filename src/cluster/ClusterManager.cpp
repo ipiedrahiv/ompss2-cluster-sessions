@@ -523,6 +523,9 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 	const int oldIndex = _singleton->_msn->getNodeIndex();
 	const int oldSize = ClusterManager::clusterSize();
 
+	// messenger calls spawn and merge, returns zero on the dying nodes.
+	const int newSize = _singleton->_msn->messengerShrink(delta);
+
 	const MessageShrinkDataInfo *dataInfos = msgShrink->getEntries();
 	std::vector<DataTransfer *> transferList;
 
@@ -557,20 +560,25 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 					false
 				);
 				transferList.push_back(tmp);
+				WriteIDManager::registerWriteIDasLocal(info.newWriteId, info.region);
+			} else if (info.newWriteId != info.oldWriteId) {
+				WriteIDManager::updateExistingWriteID(info.oldWriteId, info.newWriteId, info.region);
 			}
 			// TODO: We can add any else condition here for madvise on the other regions or to
 			// cleanup regions based on writeId.
 		}
 	}
+	WriteIDManager::limitWriteIDToMaxNodes(newSize);
+
 	ClusterManager::waitAllCompletion(transferList); // Block wait all the transfers finish
 
-	// messenger calls spawn and merge, returns zero on the dying nodes.
-	const int newSize = _singleton->_msn->messengerShrink(delta);
 
 	if (newSize > 0) { // Condition for surviving nodes
 		assert(newSize == oldSize + delta);
 		const int newIndex = _singleton->_msn->getNodeIndex();
-		assert(newIndex == oldIndex);
+
+		FatalErrorHandler::failIf(newIndex != oldIndex,
+			"Index changed after shrink: ", oldIndex, " -> ", newIndex);
 
 		// Surviving nodes
 		for (int i = oldSize - 1; i >= newSize; --i) {
@@ -776,6 +784,13 @@ int ClusterManager::nanos6Resize(int delta)
 					);
 				}
 
+				const WriteID oldWriteId = dataAccess->getWriteID();
+				const int writeIDNode = WriteIDManager::getWriteIDNode(oldWriteId);
+
+				if (writeIDNode >= expectedSize) {
+					dataAccess->setNewWriteID();
+				}
+
 				if (oldLocation != nullptr) {
 					// oldLocation is set only for the accesses we want to share. The other accesses
 					// are ignored.
@@ -783,7 +798,8 @@ int ClusterManager::nanos6Resize(int delta)
 						.region = region,
 						.oldLocationIdx = oldLocation->getIndex(),
 						.newLocationIdx = newLocation->getIndex(),
-						.writeId = dataAccess->getWriteID(),
+						.oldWriteId = oldWriteId,
+						.newWriteId = dataAccess->getWriteID(),
 						.tag = tag++  // TODO: Get the right tag here...
 					};
 
