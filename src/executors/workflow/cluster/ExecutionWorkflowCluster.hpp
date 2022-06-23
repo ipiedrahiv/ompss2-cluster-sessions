@@ -491,7 +491,9 @@ namespace ExecutionWorkflow {
 				access->setNewLocalWriteID();
 			}
 			if (access->readSatisfied()) {
-				DataAccessRegistration::setLocationFromWorkflow(access, ClusterManager::getCurrentMemoryNode(), hpDependencyData);
+				DataAccessRegistration::setLocationFromWorkflow(
+					access, ClusterManager::getCurrentMemoryNode(), hpDependencyData
+				);
 			}
 			return new Step();
 		}
@@ -499,13 +501,12 @@ namespace ExecutionWorkflow {
 		// Helpful warning messages in debug build
 
 		if (region.getSize() > (1UL<<60)) {
-			if (objectType == access_type && type != NO_ACCESS_TYPE && !isWeak) {
-				FatalErrorHandler::fail(
-					"Large access ", region,
-					" for task ", access->getOriginator()->getLabel(),
-					" is not weak"
-				);
-			}
+			FatalErrorHandler::failIf(
+				(objectType == access_type && type != NO_ACCESS_TYPE && !isWeak),
+				"Large access ", region,
+				" for task ", access->getOriginator()->getLabel(),
+				" is not weak"
+			);
 
 			// With cluster.eager_weak_fetch = true, the following code is not valid
 			//   int *a = (int *)nanos6_lmalloc(4);
@@ -516,14 +517,13 @@ namespace ExecutionWorkflow {
 			// on node 0. This is probably acceptable in this example where the weakinout
 			// is explicit, but when the weakinout is "all memory" there is too much
 			// chance of this kind of thing happening.
-			if (ClusterManager::getEagerWeakFetch() || ClusterManager::getEagerSend()) {
-
-				FatalErrorHandler::fail(
-					"Set cluster.eager_send = false and cluster.eager_weak_fetch = false for large weak memory access ",
-					region,
-					" of task ",
-					access->getOriginator()->getLabel());
-			}
+			FatalErrorHandler::failIf(
+				(ClusterManager::getEagerWeakFetch() || ClusterManager::getEagerSend()),
+				"Set cluster.eager_send = false and cluster.eager_weak_fetch = false for large weak memory access ",
+				region,
+				" of task ",
+				access->getOriginator()->getLabel()
+			);
 		}
 
 		bool needsTransfer =

@@ -43,7 +43,9 @@ public:
 
 		friend std::ostream& operator<<(std::ostream &o, const ReleaseAccessInfo &info)
 		{
-			o << "[RelReg:" << info._region << " loc:" << info._location << "]";
+			o << "[RelReg:" << info._region
+				<< " loc:" << info._location
+				<< " WriteID:" << info._writeID << "]";
 			return o;
 		}
 	};

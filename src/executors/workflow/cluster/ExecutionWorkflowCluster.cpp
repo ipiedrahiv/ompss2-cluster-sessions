@@ -94,8 +94,14 @@ namespace ExecutionWorkflow {
 			ClusterNode *destNode = _task->getClusterContext()->getRemoteNode();
 
 			int eagerSendTag = 0;
-			if (_allowEagerSend && read && !access->getDisableEagerSend() && _namespacePredecessorNode != _targetMemoryPlace->getIndex()) {      // and not propagated in remote namespace
-				TaskOffloading::DataSendRegionInfo dataSendRegionInfo = handleEagerSend(region, location, _targetMemoryPlace);
+			if (_allowEagerSend
+				&& read
+				&& !access->getDisableEagerSend()
+				&& _namespacePredecessorNode != _targetMemoryPlace->getIndex()) { // and not propagated in remote namespace
+
+				TaskOffloading::DataSendRegionInfo dataSendRegionInfo
+					= handleEagerSend(region, location, _targetMemoryPlace);
+
 				eagerSendTag = dataSendRegionInfo._id;
 				if (eagerSendTag && location != ClusterManager::getCurrentMemoryNode()) {
 					// Queue the DataSendRegionInfo for a DataSend message

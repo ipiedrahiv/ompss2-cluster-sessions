@@ -3770,7 +3770,6 @@ namespace DataAccessRegistration {
 		MemoryPlace const *location, /* OUT */ CPUDependencyData &hpDependencyData, 
 		bool isReleaseAccess
 	) {
-		(void)writeID;
 		assert(finishedTask != nullptr);
 		assert(dataAccess != nullptr);
 		// assert((location != nullptr) || dataAccess->isWeak());

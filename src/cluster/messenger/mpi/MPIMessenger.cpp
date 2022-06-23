@@ -527,7 +527,8 @@ DataTransfer *MPIMessenger::fetchData(
 	void *address = region.getStartAddress();
 	size_t size = region.getSize();
 
-	assert(mpiSrc < _wsize && mpiSrc != _wrank);
+	assert(mpiSrc < _wsize);
+	assert(mpiSrc != _wrank);
 
 	if (block) {
 		Instrument::MPILock();
