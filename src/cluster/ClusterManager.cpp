@@ -184,7 +184,7 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 			} else {
 				// Share my hostname with master.
 				DataAccessRegion region(hostname, HOST_NAME_MAX * sizeof(char));
-				_singleton->_msn->sendData(region, _masterNode, _thisNode->getIndex(), true, false);
+				_msn->sendData(region, _masterNode, _thisNode->getIndex(), true, false);
 			}
 		}
 	}
