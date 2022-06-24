@@ -19,6 +19,12 @@ struct MessageSpawnHostInfo {
 	{
 		strncpy(hostname, name.c_str(), HOST_NAME_MAX);
 	}
+
+	friend std::ostream& operator<<(std::ostream& out, const MessageSpawnHostInfo& in)
+	{
+		out << "hostname:" << in.hostname << " nprocs:" << in.nprocs;
+		return out;
+	}
 };
 
 struct MessageShrinkDataInfo {
@@ -29,6 +35,15 @@ struct MessageShrinkDataInfo {
 	WriteID oldWriteId;
 	WriteID newWriteId;
 	int tag;
+
+	friend std::ostream& operator<<(std::ostream& out, const MessageShrinkDataInfo& in)
+	{
+		out << "region:[" << in.region << "]"
+			<< " loc:" << in.oldLocationIdx << "->" << in.newLocationIdx
+			<< " WID:" << in.oldWriteId << "->" << in.newWriteId
+			<< " tag:" << in.tag;
+		return out;
+	}
 };
 
 template <typename T>
