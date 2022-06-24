@@ -403,9 +403,11 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 	assert(_singleton != nullptr);
 	assert(_singleton->_msn != nullptr);
 
-	const __attribute__((unused)) int oldIndex = _singleton->_msn->getNodeIndex();
+	const int oldIndex = _singleton->_msn->getNodeIndex();
 	const int oldSize = ClusterManager::clusterSize();
 	int newSize = oldSize;
+
+	ClusterManager::synchronizeAll();
 
 	// Stop polling services.
 	if (oldSize > 1) {
@@ -512,6 +514,9 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 	assert(_singleton != nullptr);
 	assert(_singleton->_msn != nullptr);
 
+	// We don't stop the services until everybody is here...
+	ClusterManager::synchronizeAll();
+
 	ClusterServicesPolling::shutdown();
 	ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
 
@@ -522,9 +527,6 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 	// BEFORE any resize step.
 	const int oldIndex = _singleton->_msn->getNodeIndex();
 	const int oldSize = ClusterManager::clusterSize();
-
-	// messenger calls spawn and merge, returns zero on the dying nodes.
-	const int newSize = _singleton->_msn->messengerShrink(delta);
 
 	const MessageShrinkDataInfo *dataInfos = msgShrink->getEntries();
 	std::vector<DataTransfer *> transferList;
@@ -568,12 +570,15 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 			// cleanup regions based on writeId.
 		}
 	}
-	WriteIDManager::limitWriteIDToMaxNodes(newSize);
 
 	ClusterManager::waitAllCompletion(transferList); // Block wait all the transfers finish
 
+	// messenger shrink returns zero on the dying nodes.
+	const int newSize = _singleton->_msn->messengerShrink(delta);
 
 	if (newSize > 0) { // Condition for surviving nodes
+		WriteIDManager::limitWriteIDToMaxNodes(newSize);
+
 		assert(newSize == oldSize + delta);
 		const int newIndex = _singleton->_msn->getNodeIndex();
 
@@ -686,18 +691,13 @@ int ClusterManager::nanos6Resize(int delta)
 
 
 	} else if (delta < 0) {
-
+		// This needs to take place before because we use the new home node information to
+		// redistribute data latter.
 		ClusterMemoryManagement::redistributeDmallocs(expectedSize);
 
 		// Process accesses fragments
 		WorkerThread *currentThread = WorkerThread::getCurrentWorkerThread();
 		assert(currentThread != nullptr);
-
-		// We need the stack region for some defensive code.
-		size_t stackSize;
-		void *stackPtr = currentThread->getStackAndSize(/* OUT */ stackSize);
-		DataAccessRegion stackRegion(stackPtr, stackSize);
-
 		Task *currentTask = currentThread->getTask();
 		assert(currentTask != nullptr);
 		assert(currentTask->isMainTask());
@@ -714,8 +714,6 @@ int ClusterManager::nanos6Resize(int delta)
 			[&](TaskDataAccesses::accesses_t::iterator position) -> bool {
 				DataAccess *dataAccess = &(*position);
 				assert(dataAccess != nullptr);
-
-				std::cout << *dataAccess << std::endl;
 
 				const MemoryPlace *oldLocation = nullptr;
 				const MemoryPlace *newLocation = nullptr;
@@ -751,20 +749,28 @@ int ClusterManager::nanos6Resize(int delta)
 						// one containing the bigger region and move there the whole region.
 						for (const auto &entry : *homeNodes) {
 							const MemoryPlace *location = entry->getHomeNode();
-							assert(location->getType() == nanos6_host_device);
+							assert(location->getType() == nanos6_host_device
+								|| location->getType() == nanos6_cluster_device);
 
-							// New location should be in the expected size range.
-							const size_t homeNodeId = location->getIndex();
+							const size_t homeNodeId
+								= (location->getType() == nanos6_host_device)
+								? thisLocation->getIndex()
+								: location->getIndex();
+
+							// New location should be in the expected size range because the dmalloc
+							// redistribution already took place here.
 							assert(homeNodeId < (size_t)expectedSize);
 
-							const DataAccessRegion subregion = region.intersect(entry->getAccessRegion());
+							const DataAccessRegion subregion
+								= region.intersect(entry->getAccessRegion());
 							assert(subregion.getSize() != 0);
 							bytes[homeNodeId] += subregion.getSize();
 						}
 						delete homeNodes;
 
-						const size_t destinationIndex
-							= std::distance(bytes.begin(), std::max_element(bytes.begin(), bytes.end()));
+						const size_t destinationIndex = std::distance(
+							bytes.begin(), std::max_element(bytes.begin(), bytes.end())
+						);
 
 						newLocation = ClusterManager::getMemoryNode(destinationIndex);
 
@@ -780,7 +786,7 @@ int ClusterManager::nanos6Resize(int delta)
 
 				} else {
 					FatalErrorHandler::fail(
-						"Access of type: ", accessDeviceType, " is unsupported for malleability."
+						"Region: ", region, " has unsupported access type: ", accessDeviceType
 					);
 				}
 
