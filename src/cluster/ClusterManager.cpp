@@ -200,8 +200,12 @@ void ClusterManager::initialize(int argc, char **argv)
 			gethostname(hostname, HOST_NAME_MAX) != 0, "Couldn't get hostname."
 		);
 
-
-		if (ClusterManager::isSpawned()) {
+		// First of all get the init data.
+		if (!ClusterManager::isSpawned()) {
+			// Processes in the initial world get _dataInit from the environment
+			_singleton->_dataInit._numMinNodes = ClusterManager::clusterSize();
+			_singleton->_dataInit._numMaxNodes = ClusterManager::clusterMaxSize();
+		} else {
 			// Spawned processes wait for the _dataInit from master
 			assert(!ClusterManager::isMasterNode());
 			ClusterManager::synchronizeAll();
@@ -209,13 +213,11 @@ void ClusterManager::initialize(int argc, char **argv)
 			DataAccessRegion region(&_singleton->_dataInit, sizeof(DataInitSpawn));
 
 			const ClusterMemoryNode *master = ClusterManager::getMasterNode()->getMemoryNode();
-			ClusterManager::fetchDataRaw(region, master, std::numeric_limits<int>::max(), true, false);
+			ClusterManager::fetchDataRaw(
+				region, master, std::numeric_limits<int>::max(), true, false
+			);
 
 			assert(_singleton->_dataInit.clusterMalleabilityEnabled());
-		} else {
-			// Initial processes get _dataInit from the environment
-			_singleton->_dataInit._numMinNodes = ClusterManager::clusterSize();
-			_singleton->_dataInit._numMaxNodes = ClusterManager::clusterMaxSize();
 		}
 
 		ClusterNode *currentNode = ClusterManager::getCurrentClusterNode();
@@ -426,10 +428,9 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 	const int oldSize = ClusterManager::clusterSize();
 	int newSize = oldSize;
 
-	ClusterManager::synchronizeAll();
+	ClusterManager::synchronizeAll(); // do this BEFORE stopping the polling services
 
-	// Stop polling services.
-	if (oldSize > 1) {
+	if (oldSize > 1) {                // Stop polling services.
 		ClusterServicesPolling::shutdown();
 		ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
 	}
@@ -437,9 +438,14 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 	const int delta = msgSpawn->getDeltaNodes();
 	assert(delta > 0);
 	const size_t nEntries = msgSpawn->getNEntries();
+	assert(nEntries > 0);
 
 	int spawned = 0;
 	for (size_t ent = 0; ent < nEntries; ++ent) {
+		if (ent > 0) {
+			// This to match with new processes just coming and stopping polling services
+			ClusterManager::synchronizeAll(); 
+		}
 		// Spawn entries are basically the following spawn steps. As we send a single message with
 		// all the spawn steps to perform. Apart form that the new processes will be informed to
 		// spawn also in case they are created as intermediate processes.  This method is the only
@@ -454,7 +460,6 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 
 		// messenger calls spawn and merge
 		newSize = _singleton->_msn->messengerSpawn(delta, hostname);
-		assert(_singleton->_msn->getNodeIndex() == oldIndex);
 
 		// Register the new nodes and their memory
 		for (int i = oldSize; i < newSize; ++i) {
@@ -464,7 +469,6 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 		}
 		assert(ClusterManager::clusterSize() == newSize);
 		spawned += nprocs;
-		ClusterManager::synchronizeAll();
 
 		if (ClusterManager::isMasterNode()) {
 			// Then master sends the init message to the new processes. We need to send a separate
@@ -493,21 +497,29 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 			DataAccessRegion init_region((void *)&_singleton->_dataInit, sizeof(DataInitSpawn));
 
 			for (int i = lastSize; i < newSize; ++i) {
-
 				ClusterNode *target = ClusterManager::getClusterNode(i);
 				assert(target != nullptr);
 				assert(target->getMemoryNode() != nullptr);
 
+				// Send init message
 				ClusterManager::sendDataRaw(
 					init_region, target->getMemoryNode(), std::numeric_limits<int>::max(), true
 				);
+
+				// Get hostname info form the new process
+				char tmp[HOST_NAME_MAX];
+				DataAccessRegion region(tmp, HOST_NAME_MAX * sizeof(char));
+				ClusterManager::fetchDataRaw(
+					region, target->getMemoryNode(), target->getIndex(), true, false
+				);
+				target->setHostName(tmp);
+				SlurmAPI::deltaProcessToHostname(tmp, 1);
 
 				// After the init we need to send the rest of the spawn to the new processes created
 				// in this iteration, so we can continue to the next iteration.
 				if (msgSpawn_i != nullptr) {
 					ClusterManager::sendMessage(msgSpawn_i, target, true);
 				}
-
 			}
 			delete msgSpawn_i;
 		}
@@ -676,10 +688,32 @@ int ClusterManager::nanos6Resize(int delta)
 		return oldSize;
 	}
 
+	const int neededNewHosts = SlurmAPI::requestHostsForNRanks(expectedSize);
+	// TODO: Manage correctly the error cases: ==0; <0; or >0;
+	FatalErrorHandler::failIf(
+		neededNewHosts < 0, "Request hosts for N ranks returned:", neededNewHosts
+	);
+
 	TaskWait::taskWait("nanos6Resize");
 
 	if (delta > 0) {
 		clusterPrintf("Spawning %d\n", delta);
+
+		// Check slurm for allocations.
+		if (neededNewHosts > 0) {
+			const int allocatedNewHosts = SlurmAPI::checkAllocationRequest();
+
+			// TODO: Manage correctly the error cases: ==0; <0; or >0;
+			FatalErrorHandler::failIf(
+				allocatedNewHosts < 0,
+				"Error allocating more hosts, the request check returned an error"
+			);
+
+			FatalErrorHandler::failIf(
+				allocatedNewHosts < neededNewHosts,
+				"Needed ", neededNewHosts, " jobs but only ", allocatedNewHosts, "received"
+			);
+		}
 
 		// TODO: Any spawn policy to implement may be done here in the hostInfos.
 		std::vector<MessageSpawnHostInfo> hostInfos = SlurmAPI::getSpawnHostInfoVector(delta);
@@ -694,7 +728,7 @@ int ClusterManager::nanos6Resize(int delta)
 
 		FatalErrorHandler::failIf(
 			newSize != expectedSize,
-			"Couldn't spawn ", expectedSize, " new processes; only ", newSize, " were created;"
+			"Couldn't spawn: ", expectedSize, " new processes; only: ", newSize, " were created."
 		);
 
 		// Share the existing dmallocs with the new processes.
@@ -707,15 +741,6 @@ int ClusterManager::nanos6Resize(int delta)
 			for (size_t i = oldSize; i < (size_t)newSize; ++i) {
 				ClusterNode *target = ClusterManager::getClusterNode(i);
 				ClusterManager::sendMessage(&msgDmallocInfo, target, true);
-
-				// Get hostname info form the new process
-				char tmp[HOST_NAME_MAX];
-				DataAccessRegion region(tmp, HOST_NAME_MAX * sizeof(char));
-				ClusterManager::fetchDataRaw(
-					region, target->getMemoryNode(), target->getIndex(), true, false
-				);
-				target->setHostName(tmp);
-				SlurmAPI::deltaProcessToHostname(tmp, 1);
 			}
 		}
 
