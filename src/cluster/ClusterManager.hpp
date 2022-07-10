@@ -53,6 +53,7 @@ private:
 	//!
 	//! We might need to make this a map later on, when we start adding/removing nodes
 	std::vector<ClusterNode *> _clusterNodes;
+	size_t _numMaxNodes = 0;
 
 	//! Malleability variables
 	struct DataInitSpawn _dataInit;
@@ -221,6 +222,12 @@ public:
 		assert(_singleton != nullptr);
 		assert(!_singleton->_clusterNodes.empty());
 		return _singleton->_clusterNodes.size();
+	}
+
+	static inline int clusterMaxSize()
+	{
+		assert(_singleton != nullptr);
+		return _singleton->_numMaxNodes;
 	}
 
 	//! \brief Check if we run in cluster mode

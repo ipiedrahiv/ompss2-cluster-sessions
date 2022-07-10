@@ -109,14 +109,6 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 	assert(_masterNode != nullptr);
 	assert(_thisNode->getCommIndex() == internalRank);
 
-	char hostname[HOST_NAME_MAX];
-	gethostname(hostname, HOST_NAME_MAX);
-	FatalErrorHandler::failIf(
-		gethostname(hostname, HOST_NAME_MAX) != 0,
-		"Rank:", internalRank, " couldn't get hostname."
-	);
-	_thisNode->setHostName(hostname);
-
 	ConfigVariable<bool> disableRemote("cluster.disable_remote");
 	_disableRemote = disableRemote.getValue();
 
@@ -144,54 +136,12 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 	ConfigVariable<int> numMessageHandlerWorkers("cluster.num_message_handler_workers");
 	_numMessageHandlerWorkers = numMessageHandlerWorkers.getValue();
 
-	ConfigVariable<int> numMaxNodes("cluster.num_max_nodes");
-	assert(numMaxNodes.getValue() >= 0);
-	const size_t clusterMaxSize
-		= ((size_t)numMaxNodes.getValue() > clusterSize ? numMaxNodes.getValue() : clusterSize);
+	ConfigVariable<size_t> numMaxNodes("cluster.num_max_nodes");
+	_numMaxNodes = (numMaxNodes.getValue() > clusterSize ? numMaxNodes.getValue() : clusterSize);
 
-	MessageId::initialize(internalRank, clusterMaxSize);
-	WriteIDManager::initialize(internalRank, clusterMaxSize);
-	OffloadedTaskIdManager::initialize(internalRank, clusterMaxSize);
-
-
-#if HAVE_SLURM
-	if (_msn->isSpawned()) {
-		assert(_thisNode != _masterNode);
-		_msn->synchronizeAll();
-
-		DataAccessRegion region(&_dataInit, sizeof(DataInitSpawn));
-		_msn->fetchData(region, _masterNode, std::numeric_limits<int>::max(), true, false);
-	} else {
-		_dataInit._numMinNodes = clusterSize;
-		_dataInit._numMaxNodes = clusterMaxSize;
-
-		if (_dataInit.clusterMalleabilityEnabled()) {
-			// We only share the hostnames when malleability is enabled, otherwise it is not needed.
-			if (_thisNode == _masterNode) {
-
-				for (ClusterNode *it: _clusterNodes) {
-					if (it == _thisNode) {
-						continue;          // This was already set unconditionally.
-					}
-
-					DataAccessRegion region(hostname, HOST_NAME_MAX * sizeof(char));
-					_msn->fetchData(region, it, it->getIndex(), true, false);
-					it->setHostName(hostname);
-				}
-
-				SlurmAPI::initialize(_clusterNodes);
-
-			} else {
-				// Share my hostname with master.
-				DataAccessRegion region(hostname, HOST_NAME_MAX * sizeof(char));
-				_msn->sendData(region, _masterNode, _thisNode->getIndex(), true, false);
-			}
-		}
-	}
-#else // HAVE_SLURM
-	FatalErrorHandler::failIf(_msn->isSpawned(), "Can spawn process without malleability support.")
-#endif // HAVE_SLURM
-
+	MessageId::initialize(internalRank, _numMaxNodes);
+	WriteIDManager::initialize(internalRank, _numMaxNodes);
+	OffloadedTaskIdManager::initialize(internalRank, _numMaxNodes);
 }
 
 ClusterManager::~ClusterManager()
@@ -242,6 +192,75 @@ void ClusterManager::initialize(int argc, char **argv)
 		assert(argv != nullptr);
 		_singleton = new ClusterManager(commType.getValue(), argc, argv);
 		assert(_singleton != nullptr);
+
+#if HAVE_SLURM
+		char hostname[HOST_NAME_MAX];
+		gethostname(hostname, HOST_NAME_MAX);
+		FatalErrorHandler::failIf(
+			gethostname(hostname, HOST_NAME_MAX) != 0, "Couldn't get hostname."
+		);
+
+
+		if (ClusterManager::isSpawned()) {
+			// Spawned processes wait for the _dataInit from master
+			assert(!ClusterManager::isMasterNode());
+			ClusterManager::synchronizeAll();
+
+			DataAccessRegion region(&_singleton->_dataInit, sizeof(DataInitSpawn));
+
+			const ClusterMemoryNode *master = ClusterManager::getMasterNode()->getMemoryNode();
+			ClusterManager::fetchDataRaw(region, master, std::numeric_limits<int>::max(), true, false);
+
+			assert(_singleton->_dataInit.clusterMalleabilityEnabled());
+		} else {
+			// Initial processes get _dataInit from the environment
+			_singleton->_dataInit._numMinNodes = ClusterManager::clusterSize();
+			_singleton->_dataInit._numMaxNodes = ClusterManager::clusterMaxSize();
+		}
+
+		ClusterNode *currentNode = ClusterManager::getCurrentClusterNode();
+
+		// After we have dataInit we know if malleability is enabled, not before.
+		if (_singleton->_dataInit.clusterMalleabilityEnabled()) {
+			// TODO: if sometime we implement a collective operation, this may be implemented with a
+			// gather
+			if (ClusterManager::isMasterNode()) {
+				// Master will receve the hostnames from all the processes
+				for (ClusterNode *it: ClusterManager::getClusterNodes()) {
+					char tmp[HOST_NAME_MAX];
+					if (it != currentNode) {
+						DataAccessRegion region(tmp, HOST_NAME_MAX * sizeof(char));
+						ClusterManager::fetchDataRaw(
+							region, it->getMemoryNode(), it->getIndex(), true, false
+						);
+						it->setHostName(tmp);
+					} else {
+						it->setHostName(hostname);
+					}
+				}
+
+				SlurmAPI::initialize();
+
+			} else {
+				// Share my hostname with master.
+				DataAccessRegion region(hostname, HOST_NAME_MAX * sizeof(char));
+				ClusterManager::sendDataRaw(
+					region,
+					ClusterManager::getMasterNode()->getMemoryNode(),
+					currentNode->getIndex(),
+					true, false
+				);
+			}
+		}
+
+#else // HAVE_SLURM
+		FatalErrorHandler::failIf(
+			_msn->isSpawned(), "Can spawn process without malleability support."
+		)
+#endif // HAVE_SLURM
+
+
+
 	} else {
 		_singleton = new ClusterManager();
 		assert(_singleton != nullptr);
@@ -589,6 +608,14 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 		for (int i = oldSize - 1; i >= newSize; --i) {
 			ClusterNode *node = _singleton->_clusterNodes[i];
 			VirtualMemoryManagement::unregisterNodeLocalRegion(node);
+
+			if (SlurmAPI::isEnabled()) {
+				// Discount the process from host counter.
+				assert(ClusterManager::isMasterNode());
+				assert(!node->getHostName().empty());
+				SlurmAPI::deltaProcessToHostname(node->getHostName(), -1);
+			}
+
 			delete node;
 		}
 		_singleton->_clusterNodes.resize(newSize);
@@ -613,20 +640,14 @@ int ClusterManager::nanos6Resize(int delta)
 {
 	assert(ClusterManager::isMasterNode());
 	assert(ClusterManager::getInitData().clusterMalleabilityEnabled());
-	// There is more than one host... This will be corrected with multiple processes/node
 	assert(SlurmAPI::isEnabled());
-	assert(SlurmAPI::getHostInfoVector().size() > 1);
 
-	TaskWait::taskWait("nanos6Resize");
-
-	// Just some checks
+	// Do some checks
 	const int oldSize = _singleton->_msn->getClusterSize();
-	assert(ClusterManager::clusterSize() == oldSize);
+	assert(ClusterManager::clusterSize() == oldSize);        // Let's be a bit paranoiac
 	if (delta == 0) {
 		return oldSize;
 	}
-
-	const int expectedSize = oldSize + delta;
 
 	// Some of these conditions may be substituted with assertions
 	FatalErrorHandler::failIf((size_t)oldSize < _singleton->_dataInit._numMinNodes,
@@ -642,6 +663,8 @@ int ClusterManager::nanos6Resize(int delta)
 		";", _singleton->_dataInit._numMaxNodes, "]"
 	);
 
+	const int expectedSize = oldSize + delta;
+
 	if ((size_t)expectedSize > _singleton->_dataInit._numMaxNodes
 		|| (size_t)expectedSize < _singleton->_dataInit._numMinNodes) {
 		FatalErrorHandler::warn(
@@ -653,15 +676,13 @@ int ClusterManager::nanos6Resize(int delta)
 		return oldSize;
 	}
 
+	TaskWait::taskWait("nanos6Resize");
+
 	if (delta > 0) {
 		clusterPrintf("Spawning %d\n", delta);
-		assert((size_t)oldSize < SlurmAPI::getHostInfoVector().size());
 
 		// TODO: Any spawn policy to implement may be done here in the hostInfos.
-		std::vector<MessageSpawnHostInfo> hostInfos;
-		hostInfos.push_back(
-			MessageSpawnHostInfo(SlurmAPI::getHostInfoVector()[oldSize].hostname, (size_t) delta)
-		);
+		std::vector<MessageSpawnHostInfo> hostInfos = SlurmAPI::getSpawnHostInfoVector(delta);
 
 		// Master sends spawn messages to all the OLD world
 		MessageSpawn msgSpawn(delta, hostInfos);
@@ -686,6 +707,15 @@ int ClusterManager::nanos6Resize(int delta)
 			for (size_t i = oldSize; i < (size_t)newSize; ++i) {
 				ClusterNode *target = ClusterManager::getClusterNode(i);
 				ClusterManager::sendMessage(&msgDmallocInfo, target, true);
+
+				// Get hostname info form the new process
+				char tmp[HOST_NAME_MAX];
+				DataAccessRegion region(tmp, HOST_NAME_MAX * sizeof(char));
+				ClusterManager::fetchDataRaw(
+					region, target->getMemoryNode(), target->getIndex(), true, false
+				);
+				target->setHostName(tmp);
+				SlurmAPI::deltaProcessToHostname(tmp, 1);
 			}
 		}
 
