@@ -33,7 +33,6 @@ public:
 		{
 			const int expected = _nProcesses + delta;
 			assert(expected >= 0);
-			assert((size_t)expected <= SlurmAPI::getTasksPerNode());
 			_nProcesses = expected;
 		}
 
@@ -51,20 +50,14 @@ private:
 		FatalErrorHandler::failIf(cond, reasonParts..., "Slurm Error:", slurm_strerror(errno));
 	}
 
-	template<typename... TS>
-	static inline void warnIf(bool cond, TS... reasonParts)
-	{
-		FatalErrorHandler::warnIf(cond, reasonParts..., "Slurm Warning:", slurm_strerror(errno));
-	}
-
-
 	const uint32_t _slurmJobId;
 
 	// These two need to be updated together
 	job_info_msg *_jobInfoMsg = nullptr;
 	slurm_job_info_t *_jobInfo;
 
-	// from environment
+	// We need to store this because after some malleability it may change and that's undesired for
+	// out use case.
 	size_t _tasksPerNode;
 
 	// from partition info
@@ -203,10 +196,7 @@ private:
 
 		assert(_slurmPendingMsgPtr == nullptr);
 
-		const size_t ppn = SlurmAPI::getTasksPerNode();
-		assert(ppn > 0);
-
-		const size_t requiredHosts = (N + ppn - 1) / ppn;
+		const size_t requiredHosts = (N + _tasksPerNode - 1) / _tasksPerNode;
 
 		FatalErrorHandler::failIf(
 			requiredHosts > _partitionMaxNodes,
@@ -255,7 +245,9 @@ private:
 		// This is the most important call
 		int rc = slurm_allocate_resources(&job, &_slurmPendingMsgPtr);
 		if (rc != SLURM_SUCCESS) {
-			SlurmAPI::warnIf(true, "slurm_allocate_resources returned: ", rc);
+			FatalErrorHandler::warn(
+				"slurm_allocate_resources returned: ", rc, "Slurm Warning:", slurm_strerror(errno)
+			);
 			return -1;
 		}
 
@@ -457,12 +449,6 @@ public:
 		return _singleton != nullptr;
 	}
 
-	static size_t getTasksPerNode()
-	{
-		assert(_singleton != nullptr);
-		return _singleton->_tasksPerNode;
-	}
-
 	static void deltaProcessToHostname(const std::string &hostname, int delta)
 	{
 		assert(_singleton != nullptr);
@@ -492,7 +478,7 @@ public:
 	{
 		assert(_singleton != nullptr);
 
-		const size_t ppn = SlurmAPI::getTasksPerNode();
+		const size_t ppn =  _singleton->_tasksPerNode;
 		std::vector<MessageSpawnHostInfo> ret;
 		size_t pendingToSet = delta;
 

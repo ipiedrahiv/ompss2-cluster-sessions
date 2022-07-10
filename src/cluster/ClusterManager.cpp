@@ -667,31 +667,21 @@ int ClusterManager::nanos6Resize(int delta)
 	FatalErrorHandler::failIf((size_t)oldSize > _singleton->_dataInit._numMaxNodes,
 		"Old size can't be bigger than numMaxNodes: ", _singleton->_dataInit._numMaxNodes);
 
-	FatalErrorHandler::failIf(
-		(size_t) oldSize < _singleton->_dataInit._numMinNodes
-		|| (size_t) oldSize > _singleton->_dataInit._numMaxNodes,
-		"Can't resize processes, current nodes: ", oldSize,
-		" but the valid range is: [", _singleton->_dataInit._numMinNodes,
-		";", _singleton->_dataInit._numMaxNodes, "]"
-	);
-
 	const int expectedSize = oldSize + delta;
 
-	if ((size_t)expectedSize > _singleton->_dataInit._numMaxNodes
-		|| (size_t)expectedSize < _singleton->_dataInit._numMinNodes) {
-		FatalErrorHandler::warn(
-			"Can't resize ", delta,
-			" processes, current nodes: ", oldSize,
-			" but the valid range is: [", _singleton->_dataInit._numMinNodes,
-			";", _singleton->_dataInit._numMaxNodes, "]"
-		);
-		return oldSize;
-	}
+	// Some of these conditions may be substituted with assertions
+	FatalErrorHandler::failIf((size_t)expectedSize < _singleton->_dataInit._numMinNodes,
+		"Can't resize expected:", expectedSize,
+		" smaller than _numMinNodes: ", _singleton->_dataInit._numMinNodes);
+
+	FatalErrorHandler::failIf((size_t)expectedSize > _singleton->_dataInit._numMaxNodes,
+		"Can't resize expected:", expectedSize,
+		" bigger than _numMaxNodes: ", _singleton->_dataInit._numMaxNodes);
 
 	const int neededNewHosts = SlurmAPI::requestHostsForNRanks(expectedSize);
 	// TODO: Manage correctly the error cases: ==0; <0; or >0;
 	FatalErrorHandler::failIf(
-		neededNewHosts < 0, "Request hosts for N ranks returned:", neededNewHosts
+		neededNewHosts < 0, "Request hosts for:", expectedSize," ranks; returned:", neededNewHosts
 	);
 
 	TaskWait::taskWait("nanos6Resize");
@@ -877,6 +867,10 @@ int ClusterManager::nanos6Resize(int delta)
 		__attribute__((unused)) const int newSize
 			= ClusterManager::handleResizeMessage(&msgShrink);
 		assert(newSize == expectedSize || newSize == 0); // zero for dying nodes
+
+		const int releasedHosts = SlurmAPI::releaseUnusedHosts();
+
+		FatalErrorHandler::failIf(releasedHosts < 0, "Error releasing hosts with SlurmAPI");
 	}
 
 	return expectedSize;
