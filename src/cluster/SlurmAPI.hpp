@@ -19,7 +19,7 @@
 // Part of this information may be handled by the Hardware info too; but we need to get it from
 // slurm in order to distribute the work properly.
 class SlurmAPI {
-public:
+private:
 	struct SlurmHostInfo {
 		std::string _hostname;
 		size_t _nProcesses;
@@ -43,7 +43,6 @@ public:
 		}
 	};
 
-private:
 	template<typename... TS>
 	static inline void failIf(bool cond, TS... reasonParts)
 	{
@@ -94,6 +93,13 @@ private:
 		return hostInfoIt;
 	}
 
+	void deltaProcessToHostnamePrivate(const std::string &hostname, int delta)
+	{
+		std::vector<SlurmHostInfo>::iterator info = getHostinfoByHostname(hostname);
+		assert(info != _hostInfoVector.end());
+		info->changeProcesses(delta);
+	}
+
 	static std::vector<SlurmHostInfo> hostListToHostinfoVector(const std::string &hostString)
 	{
 		std::vector<SlurmHostInfo> hostInfoVector; // for return
@@ -134,7 +140,7 @@ private:
 
 		// Now count the number of active processes per host.
 		for (ClusterNode *it : ClusterManager::getClusterNodes()) {
-			SlurmAPI::deltaProcessToHostname(it->getHostName(), 1);
+			deltaProcessToHostnamePrivate(it->getHostName(), 1);
 		}
 	}
 
@@ -261,14 +267,14 @@ private:
 
 		if (_slurmPendingMsgPtr == nullptr) {
 			// No pending allocation (no previous request or request just failed)
+			FatalErrorHandler::warn("Checking allocation with no allocation pending.");
 			return -1;
 		}
 
 		if (_slurmPendingMsgPtr->node_cnt == 0) {
 			// There is a pending allocation but it is not running yet; the struct should contain
 			// the jobid of the queued process, but nothing else useful for us (at the moment).  We
-			// use that ID to check if the job is running now.
-
+			// use that ID to check if the job is already running now.
 			const uint32_t job_id = _slurmPendingMsgPtr->job_id;
 			slurm_free_resource_allocation_response_msg(_slurmPendingMsgPtr);
 
@@ -333,7 +339,7 @@ private:
 			}
 		}
 
-		const int initialNHosts = _singleton->_hostInfoVector.size();
+		const int initialNHosts = _hostInfoVector.size();
 
 		// Remove duplicated and sort (we use it to assert sort, we shouldn't have duplication)
 		slurm_hostlist_uniq(hl);
@@ -359,20 +365,71 @@ private:
 
 		slurm_hostlist_destroy(hl);
 
-		return initialNHosts - _singleton->_hostInfoVector.size();
+		return initialNHosts - _hostInfoVector.size();
 	}
 
 
-public:
+	// This is a policy to spawn the new processes. Distributions may be implemented here. We
+	// receive here the number of extra nodes we want to spawn and the function returns a vector of 
+	// MessageSpawnHostInfo with information about how many process may be spawned in every
+	// host. This is the vector that will be shared with the other nodes to iterate over them.
+	std::vector<MessageSpawnHostInfo> getSpawnHostInfoVectorPrivate(size_t delta)
+	{
+		std::vector<MessageSpawnHostInfo> ret;
+		size_t pendingToSet = delta;
+
+		for (const SlurmHostInfo &it : _hostInfoVector) {
+
+			if (_tasksPerNode <= it._nProcesses) {
+				FatalErrorHandler::warnIf(
+					_tasksPerNode < it._nProcesses,
+					"Host ", it._hostname, " has ", it._nProcesses, " and ppn is: ", _tasksPerNode
+				);
+				continue;
+			}
+
+			const size_t spacesInHost = _tasksPerNode - it._nProcesses;
+			const size_t forThatHost = std::min(spacesInHost, pendingToSet);
+
+			ret.emplace_back(it._hostname, forThatHost);
+			pendingToSet -= forThatHost;
+
+			// If all the requested hosts were allocated, then we can return immediately
+			if (pendingToSet == 0) {
+				return ret;
+			}
+		}
+
+		// If we arrive here it means that there are not enough hosts.
+		FatalErrorHandler::fail("There are not enough hosts to spawn all processes.");
+
+		return std::vector<MessageSpawnHostInfo>();
+	}
+
 	SlurmAPI()
 		: _slurmJobId(EnvironmentVariable<uint32_t>("SLURM_JOBID").getValue()),
+		  _tasksPerNode(1),
 		  _partitionMaxNodes(std::numeric_limits<size_t>::max())
 	{
 		int rc;
+		slurm_init(NULL);
 		this->updateInternalJobInfo();
 
-		// Set job vars
-		_tasksPerNode = _jobInfo->ntasks_per_node;
+		// TODO: There should be a better way to handle this
+		// get _tasksPerNode from the environment
+		uint32_t cpus_per_task = EnvironmentVariable<uint32_t>("SLURM_CPUS_PER_TASK").getValue();
+		uint32_t cpus_on_node = EnvironmentVariable<uint32_t>("SLURM_CPUS_ON_NODE").getValue();
+
+		if (cpus_per_task > 0 && cpus_on_node > 0) {
+			_tasksPerNode = cpus_on_node / cpus_per_task;
+		} else {
+			// using mpirun SLURM_CPUS_PER_TASK is not set, but MPI_LOCALNRANKS is.
+			uint32_t mpi_localranks = EnvironmentVariable<uint32_t>("MPI_LOCALNRANKS").getValue();
+			if (mpi_localranks > 0) {
+				_tasksPerNode = mpi_localranks;
+			}
+		}
+
 		FatalErrorHandler::failIf(_tasksPerNode == 0, "Couldn't get ntasks_per_node.");
 
 
@@ -404,7 +461,8 @@ public:
 		for (uint32_t i = 0; i < partitionInfoMsg->record_count; ++i) {
 			partition_info_t &info = partitionInfoMsg->partition_array[i];
 			// Compare job partition with this one.
-			if (strcmp(_singleton->_jobInfo->partition, info.name) == 0) {
+
+			if (strcmp(_jobInfo->partition, info.name) == 0) {
 				_partitionMaxNodes = info.total_nodes;
 				break;
 			}
@@ -416,22 +474,50 @@ public:
 
 	~SlurmAPI()
 	{
-		if (_singleton->_slurmPendingMsgPtr != nullptr) {
+		// TODO: This code may be needed to call on failures with assertions or fail_if.
+		if (_slurmPendingMsgPtr != nullptr) {
 			// This should never happen, but you know... never say never to a paranoiac
 			FatalErrorHandler::warn("There is a Slurm allocation pending, needed cancelation");
 
-			int rc = slurm_kill_job(_singleton->_slurmPendingMsgPtr->job_id, SIGKILL, 0);
+			int rc = slurm_kill_job(_slurmPendingMsgPtr->job_id, SIGKILL, 0);
 			SlurmAPI::failIf(rc != SLURM_SUCCESS, "slurm_kill_job returned: ", rc);
 
-			slurm_free_resource_allocation_response_msg(_singleton->_slurmPendingMsgPtr);
+			slurm_free_resource_allocation_response_msg(_slurmPendingMsgPtr);
 		}
 
 		assert(_jobInfoMsg != nullptr);
 		slurm_free_job_info_msg(_jobInfoMsg);
+		slurm_fini();
 	}
 
+	// There seems to be a bug in the API, so this function may cause memory leaks as
+	// slurm_sprint_job_info allocates non stack memory
+	friend std::ostream &operator<<(std::ostream &out, const SlurmAPI &in)
+	{
+		assert(in._jobInfo != nullptr);
+		char *print_this = slurm_sprint_job_info(in._jobInfo, 0);
+		assert(print_this != nullptr);
+
+		std::string tmp(print_this);
+
+		out << tmp << "\n";
+
+		// There is a bug in the api... free is required, but allocation is made with internal slurm
+		// functions that gives double free error. If the error is fixed, this free may be
+		// uncommented.
+		// free(print_this);
+
+		for (const SlurmHostInfo &it : in._hostInfoVector) {
+			out << it << "\n";
+		}
+
+		return out;
+	}
+
+public:
 	static void initialize()
 	{
+		assert(ClusterManager::isMasterNode());
 		assert(_singleton == nullptr);
 		_singleton = new SlurmAPI();
 		assert(_singleton != nullptr);
@@ -452,8 +538,7 @@ public:
 	static void deltaProcessToHostname(const std::string &hostname, int delta)
 	{
 		assert(_singleton != nullptr);
-		std::vector<SlurmHostInfo>::iterator info = _singleton->getHostinfoByHostname(hostname);
-		info->changeProcesses(delta);
+		_singleton->deltaProcessToHostnamePrivate(hostname, delta);
 	}
 
 	static int requestHostsForNRanks(size_t N)
@@ -469,46 +554,10 @@ public:
 		return _singleton->checkAllocationRequestPrivate();
 	}
 
-
-	// This is a policy to spawn the new processes. Distributions may be implemented here. We
-	// receive here the number of extra nodes we want to spawn and the function returns a vector of 
-	// MessageSpawnHostInfo with information about how many process may be spawned in every
-	// host. This is the vector that will be shared with the other nodes to iterate over them.
 	static std::vector<MessageSpawnHostInfo> getSpawnHostInfoVector(size_t delta)
 	{
 		assert(_singleton != nullptr);
-
-		const size_t ppn =  _singleton->_tasksPerNode;
-		std::vector<MessageSpawnHostInfo> ret;
-		size_t pendingToSet = delta;
-
-		for (SlurmHostInfo &it : _singleton->_hostInfoVector ) {
-
-			if (ppn <= it._nProcesses) {
-				// This should never ever happen.
-				FatalErrorHandler::warnIf(
-					ppn < it._nProcesses,
-					"Host ", it._hostname, " has ", it._nProcesses, " and ppn is: ", ppn
-				);
-				continue;
-			}
-
-			const size_t spacesInHost = ppn - it._nProcesses;
-			const size_t forThatHost = std::min(spacesInHost, pendingToSet);
-
-			ret.emplace_back(it._hostname, forThatHost);
-			pendingToSet -= forThatHost;
-
-			// If all the requested hosts were allocated, then we can return immediately
-			if (pendingToSet == 0) {
-				return ret;
-			}
-		}
-
-		// If we arrive here it means that there are not enough hosts.
-		FatalErrorHandler::fail("There are not enough hosts to spawn all processes.");
-
-		return std::vector<MessageSpawnHostInfo>();
+		return _singleton->getSpawnHostInfoVectorPrivate(delta);
 	}
 
 	static int releaseUnusedHosts()
