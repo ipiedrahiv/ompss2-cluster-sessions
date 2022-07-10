@@ -188,6 +188,189 @@ private:
 		}
 	}
 
+	// This performs a resources request if N processes does not fit in the current number of hosts.
+	// The request returns immediately (either with the resources or not; we don't care at this
+	// point).  Some other function may check the allocation latter.  This call can/may be done
+	// before the taskwait implicit in the resize function to request in advance and the latter
+	// check after the taskwait will have more probabilities that the new resources granted on that
+	// point.
+	// 0 no request needed; >0 request made (number of new hosts requested); <0 error
+	int requestHostsForNRanksPrivate(size_t N)
+	{
+		if (ClusterManager::clusterSize() >= (int)N) {
+			return 0;
+		}
+
+		assert(_slurmPendingMsgPtr == nullptr);
+
+		const size_t ppn = SlurmAPI::getTasksPerNode();
+		assert(ppn > 0);
+
+		const size_t requiredHosts = (N + ppn - 1) / ppn;
+
+		FatalErrorHandler::failIf(
+			requiredHosts > _partitionMaxNodes,
+			"Creating: ", N, " processes require: ",
+			requiredHosts," hosts; more than partition max nodes:", _partitionMaxNodes
+		);
+
+		const int deltaHosts =  requiredHosts - _hostInfoVector.size();
+
+		if (deltaHosts <= 0) {
+			return 0;
+		}
+
+		FatalErrorHandler::failIf(
+			_permitsExpansion == false,
+			"Can't request: ", deltaHosts, " new hosts; permit_job_expansion is not set"
+		);
+
+		// As we require more hosts that what we currently have. So we make an allocation
+		// request. In general this is just a request, we don't need to fail if there is an error or
+		// wait until the allocation is done. That will be handled latter.
+
+		// Being strict the new allocation job will not last more than the current one, so it is
+		// better to limit the timer assuming that in the worst case both will end together. In a
+		// realistic application the time_limit is the default from the partition, which may be too
+		// long; delaying the process in the queue. Time is in minutes for slurm.
+		uint32_t time_limit = std::difftime(_jobInfo->end_time, std::time(NULL)) / 60;
+
+		job_desc_msg_t job;
+		slurm_init_job_desc_msg(&job);
+
+		char jobname[] = "temp_job ";
+
+		job.name = jobname;
+		job.time_limit = time_limit; // min
+		job.min_nodes = deltaHosts;
+		job.user_id = _jobInfo->user_id;
+		job.group_id = _jobInfo->group_id;
+		job.partition = _jobInfo->partition;
+
+		// Expand current job
+		std::string dependency = "expand:" + std::to_string(_slurmJobId);
+		job.dependency = (char *) alloca(dependency.size() + 1);
+		dependency.copy(job.dependency, dependency.size(), 0);
+
+		// This is the most important call
+		int rc = slurm_allocate_resources(&job, &_slurmPendingMsgPtr);
+		if (rc != SLURM_SUCCESS) {
+			SlurmAPI::warnIf(true, "slurm_allocate_resources returned: ", rc);
+			return -1;
+		}
+
+		return deltaHosts;
+	}
+
+	// > 0 success (number of new hosts); 0 job still in the queue; < 0 error (no pending request)
+	int checkAllocationRequestPrivate()
+	{
+		int rc;
+
+		if (_slurmPendingMsgPtr == nullptr) {
+			// No pending allocation (no previous request or request just failed)
+			return -1;
+		}
+
+		if (_slurmPendingMsgPtr->node_cnt == 0) {
+			// There is a pending allocation but it is not running yet; the struct should contain
+			// the jobid of the queued process, but nothing else useful for us (at the moment).  We
+			// use that ID to check if the job is running now.
+
+			const uint32_t job_id = _slurmPendingMsgPtr->job_id;
+			slurm_free_resource_allocation_response_msg(_slurmPendingMsgPtr);
+
+			rc = slurm_allocation_lookup(job_id, &_slurmPendingMsgPtr);
+			SlurmAPI::failIf(rc != SLURM_SUCCESS, "slurm_allocation_lookup returned: ", rc);
+
+			if (_slurmPendingMsgPtr->node_cnt == 0) {
+				// The allocation is still in the queue; not running yet
+				return 0;
+			}
+		}
+
+		// If we are here it means that the allocation has some nodes... so it is already running
+		// and we can update the job.
+		SlurmAPI::failIf(
+			_slurmPendingMsgPtr->node_list == NULL,
+			"slurm_allocation didn't return a list."
+		);
+
+		const int nNewNodes = _slurmPendingMsgPtr->node_cnt;
+		assert(nNewNodes > 0);
+
+		// Update the new job to have zero resources and kill
+		job_desc_msg_t jobUpdate;
+		slurm_init_job_desc_msg(&jobUpdate);
+		jobUpdate.job_id = _slurmPendingMsgPtr->job_id;
+		jobUpdate.min_nodes = 0;
+		rc = slurm_update_job(&jobUpdate);
+		SlurmAPI::failIf(rc != SLURM_SUCCESS, "From slurm_update_job reducing new Slurm Job.");
+
+		rc = slurm_kill_job(_slurmPendingMsgPtr->job_id, 9, 0);
+		SlurmAPI::failIf(rc != SLURM_SUCCESS, "From slurm_kill_job killing allocated Job.");
+
+		// Update myself to take the new resources (nodes) for myself
+		slurm_init_job_desc_msg(&jobUpdate);
+		jobUpdate.job_id = _slurmJobId;
+		jobUpdate.min_nodes = _hostInfoVector.size() + nNewNodes;
+		rc = slurm_update_job(&jobUpdate);
+		SlurmAPI::failIf(rc != SLURM_SUCCESS, "From slurm_update_job spawning Slurm Job.");
+
+		// If we are here it means that the spawn succeded, so we add the new hosts to our list and
+		// recount.
+		updateInternalJobInfo();
+		updateEnvironment();
+
+		// Now we cleanup the request
+		slurm_free_resource_allocation_response_msg(_slurmPendingMsgPtr);
+		_slurmPendingMsgPtr = nullptr;
+
+		return nNewNodes;
+	}
+
+	int releaseUnusedHostsPrivate()
+	{
+		// This works by creating a hostlist with the hosts containing a process and updating the
+		// current job hostlist. After an update we need to update the environment to be consistent.
+		hostlist_t hl = slurm_hostlist_create(NULL);
+
+		for (SlurmHostInfo &it : _hostInfoVector ) {
+			if (it._nProcesses > 0) {
+				slurm_hostlist_push_host(hl, it._hostname.c_str());
+			}
+		}
+
+		const int initialNHosts = _singleton->_hostInfoVector.size();
+
+		// Remove duplicated and sort (we use it to assert sort, we shouldn't have duplication)
+		slurm_hostlist_uniq(hl);
+
+		const int finalNHosts = slurm_hostlist_count(hl);
+
+		if (finalNHosts != initialNHosts) {
+			assert(finalNHosts < initialNHosts);
+
+			job_desc_msg_t jobUpdate;
+			slurm_init_job_desc_msg(&jobUpdate);
+			jobUpdate.job_id = _slurmJobId;
+			jobUpdate.req_nodes = slurm_hostlist_ranged_string_malloc(hl); // this calls malloc
+
+			int rc = slurm_update_job(&jobUpdate);
+			SlurmAPI::failIf(rc != SLURM_SUCCESS, "slurm_update_job releasing Job returned:", rc);
+
+			updateInternalJobInfo();
+			updateEnvironment();
+
+			free(jobUpdate.req_nodes);  // So this calls free
+		}
+
+		slurm_hostlist_destroy(hl);
+
+		return initialNHosts - _singleton->_hostInfoVector.size();
+	}
+
+
 public:
 	SlurmAPI()
 		: _slurmJobId(EnvironmentVariable<uint32_t>("SLURM_JOBID").getValue()),
@@ -287,143 +470,17 @@ public:
 		info->changeProcesses(delta);
 	}
 
-	// This performs a resources request if N processes does not fit in the current number of hosts.
-	// The request returns immediately (either with the resources or not; we don't care at this
-	// point).  Some other function may check the allocation latter.  This call can/may be done
-	// before the taskwait implicit in the resize function to request in advance and the latter
-	// check after the taskwait will have more probabilities that the new resources granted on that
-	// point.
-	// 0 no request needed; >0 request made (number of new hosts requested); <0 error
 	static int requestHostsForNRanks(size_t N)
 	{
 		assert(_singleton != nullptr);
 		assert(_singleton->_slurmPendingMsgPtr == nullptr);
-
-		const size_t ppn = SlurmAPI::getTasksPerNode();
-		assert(ppn > 0);
-
-		const size_t requiredHosts = (N + ppn - 1) / ppn;
-
-		FatalErrorHandler::failIf(
-			requiredHosts > _singleton->_partitionMaxNodes,
-			"Require more hosts to expand to: ", N,
-			" processes than partition: ", _singleton->_partitionMaxNodes
-		);
-
-		const int deltaHosts =  requiredHosts - _singleton->_hostInfoVector.size();
-
-		if (deltaHosts <= 0) {
-			return 0;
-		}
-
-		FatalErrorHandler::failIf(
-			_singleton->_permitsExpansion == false,
-			"Can't request: ", deltaHosts, " new hosts; permit_job_expansion is not set"
-		);
-
-		// As we require more hosts that what we currently have. So we make an allocation
-		// request. In general this is just a request, we don't need to fail if there is an error or
-		// wait until the allocation is done. That will be handled latter.
-
-		// Being strict the new allocation job will not last more than the current one, so it is
-		// better to limit the timer assuming that in the worst case both will end together. In a
-		// realistic application the time_limit is the default from the partition, which may be too
-		// long; delaying the process in the queue. Time is in minutes for slurm.
-		uint32_t time_limit = std::difftime(_singleton->_jobInfo->end_time, std::time(NULL)) / 60;
-
-		job_desc_msg_t job;
-		slurm_init_job_desc_msg(&job);
-
-		char jobname[] = "temp_job ";
-
-		job.name = jobname;
-		job.time_limit = time_limit; // min
-		job.min_nodes = deltaHosts;
-		job.user_id = _singleton->_jobInfo->user_id;
-		job.group_id = _singleton->_jobInfo->group_id;
-		job.partition = _singleton->_jobInfo->partition;
-
-		// Expand current job
-		std::string dependency = "expand:" + std::to_string(_singleton->_slurmJobId);
-		job.dependency = (char *) alloca(dependency.size() + 1);
-		dependency.copy(job.dependency, dependency.size(), 0);
-
-		// This is the most important call
-		int rc = slurm_allocate_resources(&job, &_singleton->_slurmPendingMsgPtr);
-		if (rc != SLURM_SUCCESS) {
-			SlurmAPI::warnIf(true, "slurm_allocate_resources returned: ", rc);
-			return -1;
-		}
-
-		return deltaHosts;
+		return _singleton->requestHostsForNRanksPrivate(N);
 	}
 
-
-	// > 0 success (number of new hosts); 0 job still in the queue; < 0 error (no pending request)
 	static int checkAllocationRequest()
 	{
-		int rc;
-
-		if (_singleton->_slurmPendingMsgPtr == nullptr) {
-			// No pending allocation (no previous request or request just failed)
-			return -1;
-		}
-
-		if (_singleton->_slurmPendingMsgPtr->node_cnt == 0) {
-			// There is a pending allocation but it is not running yet; the struct should contain
-			// the jobid of the queued process, but nothing else useful for us (at the moment).  We
-			// use that ID to check if the job is running now.
-
-			const uint32_t job_id = _singleton->_slurmPendingMsgPtr->job_id;
-			slurm_free_resource_allocation_response_msg(_singleton->_slurmPendingMsgPtr);
-
-			rc = slurm_allocation_lookup(job_id, &_singleton->_slurmPendingMsgPtr);
-			SlurmAPI::failIf(rc != SLURM_SUCCESS, "slurm_allocation_lookup returned: ", rc);
-
-			if (_singleton->_slurmPendingMsgPtr->node_cnt == 0) {
-				// The allocation is still in the queue; not running yet
-				return 0;
-			}
-		}
-
-		// If we are here it means that the allocation has some nodes... so it is already running
-		// and we can update the job.
-		SlurmAPI::failIf(
-			_singleton->_slurmPendingMsgPtr->node_list == NULL,
-			"slurm_allocation didn't return a list."
-		);
-
-		const int nNewNodes = _singleton->_slurmPendingMsgPtr->node_cnt;
-		assert(nNewNodes > 0);
-
-		// Update the new job to have zero resources and kill
-		job_desc_msg_t jobUpdate;
-		slurm_init_job_desc_msg(&jobUpdate);
-		jobUpdate.job_id = _singleton->_slurmPendingMsgPtr->job_id;
-		jobUpdate.min_nodes = 0;
-		rc = slurm_update_job(&jobUpdate);
-		SlurmAPI::failIf(rc != SLURM_SUCCESS, "From slurm_update_job reducing new Slurm Job.");
-
-		rc = slurm_kill_job(_singleton->_slurmPendingMsgPtr->job_id, 9, 0);
-		SlurmAPI::failIf(rc != SLURM_SUCCESS, "From slurm_kill_job killing allocated Job.");
-
-		// Update myself to take the new resources (nodes) for myself
-		slurm_init_job_desc_msg(&jobUpdate);
-		jobUpdate.job_id = _singleton->_slurmJobId;
-		jobUpdate.min_nodes = _singleton->_hostInfoVector.size() + nNewNodes;
-		rc = slurm_update_job(&jobUpdate);
-		SlurmAPI::failIf(rc != SLURM_SUCCESS, "From slurm_update_job spawning Slurm Job.");
-
-		// If we are here it means that the spawn succeded, so we add the new hosts to our list and
-		// recount.
-		_singleton->updateInternalJobInfo();
-		_singleton->updateEnvironment();
-
-		// Now we cleanup the request
-		slurm_free_resource_allocation_response_msg(_singleton->_slurmPendingMsgPtr);
-		_singleton->_slurmPendingMsgPtr = nullptr;
-
-		return nNewNodes;
+		assert(_singleton != nullptr);
+		return _singleton->checkAllocationRequestPrivate();
 	}
 
 
@@ -433,6 +490,8 @@ public:
 	// host. This is the vector that will be shared with the other nodes to iterate over them.
 	static std::vector<MessageSpawnHostInfo> getSpawnHostInfoVector(size_t delta)
 	{
+		assert(_singleton != nullptr);
+
 		const size_t ppn = SlurmAPI::getTasksPerNode();
 		std::vector<MessageSpawnHostInfo> ret;
 		size_t pendingToSet = delta;
@@ -466,34 +525,10 @@ public:
 		return std::vector<MessageSpawnHostInfo>();
 	}
 
-	static void releaseUnusedHosts()
+	static int releaseUnusedHosts()
 	{
-		// This works by creating a hostlist with the hosts containing a process and updating the
-		// current job hostlist. After an update we need to update the environment to be consistent.
-		hostlist_t hl = slurm_hostlist_create(NULL);
-
-		for (SlurmHostInfo &it : _singleton->_hostInfoVector ) {
-			if (it._nProcesses > 0) {
-				slurm_hostlist_push_host(hl, it._hostname.c_str());
-			}
-		}
-
-		// Remove duplicated and sort (we use it to assert sort, we shouldn't have duplication)
-		slurm_hostlist_uniq(hl);
-
-		job_desc_msg_t jobUpdate;
-		slurm_init_job_desc_msg(&jobUpdate);
-		jobUpdate.job_id = _singleton->_slurmJobId;
-		jobUpdate.req_nodes = slurm_hostlist_ranged_string_malloc(hl); // this calls malloc
-
-		int rc = slurm_update_job(&jobUpdate);
-		SlurmAPI::failIf(rc != SLURM_SUCCESS, "slurm_update_job releasing Job returned:", rc);
-
-		_singleton->updateInternalJobInfo();
-		_singleton->updateEnvironment();
-
-		free(jobUpdate.req_nodes);
-		slurm_hostlist_destroy(hl);
+		assert(_singleton != nullptr);
+		return _singleton->releaseUnusedHostsPrivate();
 	}
 
 };
