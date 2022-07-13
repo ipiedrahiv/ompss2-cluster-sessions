@@ -677,7 +677,11 @@ int ClusterManager::nanos6Resize(int delta)
 		"Can't resize expected:", expectedSize,
 		" bigger than _numMaxNodes: ", _singleton->_dataInit._numMaxNodes);
 
-	const int neededNewHosts = SlurmAPI::requestHostsForNRanks(expectedSize);
+	const int neededNewHosts
+		= SlurmAPI::permitsExpansion()
+		? SlurmAPI::requestHostsForNRanks(expectedSize)
+		: 0;
+
 	// TODO: Manage correctly the error cases: ==0; <0; or >0;
 	FatalErrorHandler::failIf(
 		neededNewHosts < 0, "Request hosts for:", expectedSize," ranks; returned:", neededNewHosts
@@ -864,9 +868,13 @@ int ClusterManager::nanos6Resize(int delta)
 			= ClusterManager::handleResizeMessage(&msgShrink);
 		assert(newSize == expectedSize || newSize == 0); // zero for dying nodes
 
-		// const int releasedHosts = SlurmAPI::releaseUnusedHosts();
+		if (SlurmAPI:: permitsExpansion()) {
+			// We don't want to (really) release the hosts back to slurm IF permitsExpansion is
+			// disabled, because it may be impossible to reallocate them back in the future.
+			const int releasedHosts = SlurmAPI::releaseUnusedHosts();
+			FatalErrorHandler::failIf(releasedHosts < 0, "Error releasing hosts with SlurmAPI");
+		}
 
-		// FatalErrorHandler::failIf(releasedHosts < 0, "Error releasing hosts with SlurmAPI");
 	}
 
 	return expectedSize;

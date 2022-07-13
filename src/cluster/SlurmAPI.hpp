@@ -217,7 +217,7 @@ private:
 		}
 
 		FatalErrorHandler::failIf(
-			_permitsExpansion == false,
+			!_permitsExpansion,
 			"Can't request: ", deltaHosts, " new hosts; permit_job_expansion is not set"
 		);
 
@@ -579,6 +579,12 @@ public:
 	{
 		assert(_singleton != nullptr);
 		return _singleton->releaseUnusedHostsPrivate();
+	}
+
+	static bool permitsExpansion()
+	{
+		assert(_singleton != nullptr);
+		return _singleton->_permitsExpansion;
 	}
 
 };
