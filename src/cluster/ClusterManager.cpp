@@ -428,6 +428,18 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 		ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
 	}
 
+	MessageDmalloc *msgDmallocInfo = nullptr;
+	if (ClusterManager::isMasterNode()) {
+		// Share the existing dmallocs with the new processes.
+		const ClusterMemoryManagement::dmalloc_container_t &mallocsList
+			= ClusterMemoryManagement::getMallocsList();
+
+		if (mallocsList.size() > 0) {
+			msgDmallocInfo = new MessageDmalloc(mallocsList);
+		}
+	}
+
+
 	const int delta = msgSpawn->getDeltaNodes();
 	assert(delta > 0);
 	const size_t nEntries = msgSpawn->getNEntries();
@@ -513,6 +525,11 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 				target->setHostName(tmp);
 				SlurmAPI::deltaProcessToHostname(tmp, 1);
 
+				// Send dmallocs now very early and before the spawn order
+				if (msgDmallocInfo != nullptr) {
+					ClusterManager::sendMessage(msgDmallocInfo, target, true);
+				}
+
 				// After the init we need to send the rest of the spawn to the new processes created
 				// in this iteration, so we can continue to the next iteration.
 				if (msgSpawn_i != nullptr) {
@@ -524,16 +541,20 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 		}
 	}
 
+	if (msgDmallocInfo) {
+		delete msgDmallocInfo;
+	}
+
 	const int newIndex = _singleton->_msn->getNodeIndex();
 	FatalErrorHandler::failIf(newIndex != oldIndex,
 		"Index changed after spawn: ", oldIndex, " -> ", newIndex);
 
 	assert(newSize == oldSize + delta);
+	assert (newSize > 1);
 
-	if (newSize > 1) { // When we started with a single node polling services didn't start.
-		ClusterServicesPolling::initialize();
-		ClusterServicesTask::initializeWorkers(_singleton->_numMessageHandlerWorkers);
-	}
+	// Restart the services
+	ClusterServicesPolling::initialize();
+	ClusterServicesTask::initializeWorkers(_singleton->_numMessageHandlerWorkers);
 
 	return newSize;
 }
@@ -721,19 +742,6 @@ int ClusterManager::nanos6Resize(int delta)
 			newSize != expectedSize,
 			"Couldn't spawn: ", expectedSize, " new processes; only: ", newSize, " were created."
 		);
-
-		// Share the existing dmallocs with the new processes.
-		const ClusterMemoryManagement::dmalloc_container_t &mallocsList
-			= ClusterMemoryManagement::getMallocsList();
-
-		if (mallocsList.size() > 0) {
-			MessageDmalloc msgDmallocInfo(mallocsList);
-
-			for (size_t i = oldSize; i < (size_t)newSize; ++i) {
-				ClusterNode *target = ClusterManager::getClusterNode(i);
-				ClusterManager::sendMessage(&msgDmallocInfo, target, true);
-			}
-		}
 
 	} else if (delta < 0) {
 		// This needs to take place before because we use the new home node information to
