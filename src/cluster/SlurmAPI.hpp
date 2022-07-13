@@ -432,6 +432,17 @@ private:
 
 		FatalErrorHandler::failIf(_tasksPerNode == 0, "Couldn't get ntasks_per_node.");
 
+		if (_tasksPerNode > 1) {
+			// Allow  a  step  access  to only the resources requested for the step
+			FatalErrorHandler::failIf(
+				EnvironmentVariable<bool>("SLURM_EXACT").getValue() == false,
+				"Environment variable SLURM_EXACT not set."
+			);
+			FatalErrorHandler::warnIf(
+				EnvironmentVariable<bool>("SLURM_OVERCOMMIT").getValue() == true,
+				"Environment variable SLURM_OVERCOMMIT is set, this may be undesirable."
+			);
+		}
 
 		// Get the config information ======================
 		slurm_conf_t  *slurmCtlConf = NULL;
@@ -510,6 +521,10 @@ private:
 		for (const SlurmHostInfo &it : in._hostInfoVector) {
 			out << it << "\n";
 		}
+
+		out << "tasksPerNode: " << in._tasksPerNode << "\n";
+		out << "partitionMaxNodes: " << in._partitionMaxNodes << "\n";
+		out << "permitsExpansion: " << in._permitsExpansion << "\n";
 
 		return out;
 	}

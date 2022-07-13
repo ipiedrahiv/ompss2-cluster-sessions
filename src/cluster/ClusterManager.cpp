@@ -208,7 +208,6 @@ void ClusterManager::initialize(int argc, char **argv)
 		} else {
 			// Spawned processes wait for the _dataInit from master
 			assert(!ClusterManager::isMasterNode());
-			ClusterManager::synchronizeAll();
 
 			DataAccessRegion region(&_singleton->_dataInit, sizeof(DataInitSpawn));
 
@@ -255,18 +254,17 @@ void ClusterManager::initialize(int argc, char **argv)
 			}
 		}
 
-#else // HAVE_SLURM
-		FatalErrorHandler::failIf(
-			_msn->isSpawned(), "Can spawn process without malleability support."
-		)
-#endif // HAVE_SLURM
-
-
-
 	} else {
 		_singleton = new ClusterManager();
 		assert(_singleton != nullptr);
 	}
+
+#else // HAVE_SLURM
+	FatalErrorHandler::failIf(
+		ClusterManager::isSpawned(), "Can spawn process without malleability support."
+	);
+#endif // HAVE_SLURM
+
 }
 
 // This needs to be called AFTER initializing the memory allocator
@@ -316,12 +314,7 @@ void ClusterManager::shutdownPhase1()
 {
 	assert(NodeNamespace::isEnabled() || ClusterManager::getMessenger() == nullptr);
 	assert(_singleton != nullptr);
-	assert(NodeNamespace::isEnabled());
 	assert(MemoryAllocator::isInitialized());
-
-	if (ClusterManager::inClusterMode()) {
-		ClusterServicesPolling::waitUntilFinished();
-	}
 
 	if (ClusterManager::getMessenger() != nullptr && ClusterManager::isMasterNode()) {
 		assert(!ClusterManager::isSpawned());
@@ -453,16 +446,21 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 		// performing everything with a minimal number of messages.
 		const MessageSpawnHostInfo &info = msgSpawn->getEntries()[ent];
 
+
 		const std::string hostname(info.hostname);
 		const size_t nprocs = info.nprocs;
 		const int lastSize = ClusterManager::clusterSize();
+
 		assert(lastSize == oldSize + spawned);
 
-		// messenger calls spawn and merge
-		newSize = _singleton->_msn->messengerSpawn(delta, hostname);
+		// TODO: This may be changed with a loop to spawn with granularity one and then allow
+		// completely free shrinking without size contrains.
+		// 1. The spawn one by one may take significant more time than spawning in groups
+		// 2. This compulsively needs SLURM_OVERCOMMIT to be disabled.
+		newSize = _singleton->_msn->messengerSpawn(nprocs, hostname);
 
 		// Register the new nodes and their memory
-		for (int i = oldSize; i < newSize; ++i) {
+		for (int i = lastSize; i < newSize; ++i) {
 			ClusterNode *node = new ClusterNode(i, i, 0, false, i);
 			_singleton->_clusterNodes.push_back(node);
 			VirtualMemoryManagement::registerNodeLocalRegion(node);
@@ -520,6 +518,7 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 				if (msgSpawn_i != nullptr) {
 					ClusterManager::sendMessage(msgSpawn_i, target, true);
 				}
+
 			}
 			delete msgSpawn_i;
 		}
@@ -687,8 +686,6 @@ int ClusterManager::nanos6Resize(int delta)
 	TaskWait::taskWait("nanos6Resize");
 
 	if (delta > 0) {
-		clusterPrintf("Spawning %d\n", delta);
-
 		// Check slurm for allocations.
 		if (neededNewHosts > 0) {
 			const int allocatedNewHosts = SlurmAPI::checkAllocationRequest();
@@ -733,7 +730,6 @@ int ClusterManager::nanos6Resize(int delta)
 				ClusterManager::sendMessage(&msgDmallocInfo, target, true);
 			}
 		}
-
 
 	} else if (delta < 0) {
 		// This needs to take place before because we use the new home node information to
@@ -868,9 +864,9 @@ int ClusterManager::nanos6Resize(int delta)
 			= ClusterManager::handleResizeMessage(&msgShrink);
 		assert(newSize == expectedSize || newSize == 0); // zero for dying nodes
 
-		const int releasedHosts = SlurmAPI::releaseUnusedHosts();
+		// const int releasedHosts = SlurmAPI::releaseUnusedHosts();
 
-		FatalErrorHandler::failIf(releasedHosts < 0, "Error releasing hosts with SlurmAPI");
+		// FatalErrorHandler::failIf(releasedHosts < 0, "Error releasing hosts with SlurmAPI");
 	}
 
 	return expectedSize;
