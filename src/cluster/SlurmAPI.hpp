@@ -46,7 +46,7 @@ private:
 	template<typename... TS>
 	static inline void failIf(bool cond, TS... reasonParts)
 	{
-		FatalErrorHandler::failIf(cond, reasonParts..., "Slurm Error:", slurm_strerror(errno));
+		FatalErrorHandler::failIf(cond, reasonParts..., " Slurm Error:", slurm_strerror(errno));
 	}
 
 	const uint32_t _slurmJobId;
@@ -244,15 +244,14 @@ private:
 		job.partition = _jobInfo->partition;
 
 		// Expand current job
-		std::string dependency = "expand:" + std::to_string(_slurmJobId);
-		job.dependency = (char *) alloca(dependency.size() + 1);
-		dependency.copy(job.dependency, dependency.size(), 0);
+		job.dependency = (char *) alloca(128);
+		sprintf(job.dependency, "expand:%u", _slurmJobId);
 
 		// This is the most important call
 		int rc = slurm_allocate_resources(&job, &_slurmPendingMsgPtr);
 		if (rc != SLURM_SUCCESS) {
 			FatalErrorHandler::warn(
-				"slurm_allocate_resources returned: ", rc, "Slurm Warning:", slurm_strerror(errno)
+				"slurm_allocate_resources returned: ", rc, " Slurm Warning: " , slurm_strerror(errno)
 			);
 			return -1;
 		}
@@ -305,8 +304,11 @@ private:
 		rc = slurm_update_job(&jobUpdate);
 		SlurmAPI::failIf(rc != SLURM_SUCCESS, "From slurm_update_job reducing new Slurm Job.");
 
+		// We don't really need to check that this job is killed. But lets be a bit paranoiac.
 		rc = slurm_kill_job(_slurmPendingMsgPtr->job_id, 9, 0);
-		SlurmAPI::failIf(rc != SLURM_SUCCESS, "From slurm_kill_job killing allocated Job.");
+		FatalErrorHandler::warnIf(rc != SLURM_SUCCESS,
+			"slurm_kill_job returned: ", rc, " killing allocated Job. Slurm Warning: " , slurm_strerror(errno)
+		);
 
 		// Update myself to take the new resources (nodes) for myself
 		slurm_init_job_desc_msg(&jobUpdate);
@@ -415,13 +417,25 @@ private:
 		slurm_init(NULL);
 		this->updateInternalJobInfo();
 
-		// TODO: There should be a better way to handle this
-		// get _tasksPerNode from the environment
-		uint32_t cpus_per_task = EnvironmentVariable<uint32_t>("SLURM_CPUS_PER_TASK").getValue();
-		uint32_t cpus_on_node = EnvironmentVariable<uint32_t>("SLURM_CPUS_ON_NODE").getValue();
+		// This is the best; but only available when --cpu-bind is given.
+		const uint32_t cpus_per_task = EnvironmentVariable<uint32_t>("SLURM_CPUS_PER_TASK").getValue();
 
-		if (cpus_per_task > 0 && cpus_on_node > 0) {
+		if (cpus_per_task > 0) {
+			// Ger information from the allocation, not available from the job
+			resource_allocation_response_msg_t *alloc_info;
+			rc = slurm_allocation_lookup(_slurmJobId, &alloc_info);
+			SlurmAPI::failIf(rc != SLURM_SUCCESS, "slurm_allocation_lookup returned: ", rc);
+			assert(alloc_info->num_cpu_groups == 1);            // We asume that all nodes are equal
+			assert(alloc_info->cpus_per_node != nullptr);
+
+			const uint32_t cpus_on_node = alloc_info->cpus_per_node[0];
+			assert(cpus_on_node > 0);
+			assert(cpus_on_node >= cpus_per_task);
+
 			_tasksPerNode = cpus_on_node / cpus_per_task;
+			assert(_tasksPerNode > 0);
+
+			slurm_free_resource_allocation_response_msg(alloc_info);
 		} else {
 			// using mpirun SLURM_CPUS_PER_TASK is not set, but MPI_LOCALNRANKS is.
 			uint32_t mpi_localranks = EnvironmentVariable<uint32_t>("MPI_LOCALNRANKS").getValue();
@@ -491,7 +505,7 @@ private:
 			FatalErrorHandler::warn("There is a Slurm allocation pending, needed cancelation");
 
 			int rc = slurm_kill_job(_slurmPendingMsgPtr->job_id, SIGKILL, 0);
-			SlurmAPI::failIf(rc != SLURM_SUCCESS, "slurm_kill_job returned: ", rc);
+			SlurmAPI::failIf(rc != SLURM_SUCCESS, "slurm_kill_job in destructor returned: ", rc);
 
 			slurm_free_resource_allocation_response_msg(_slurmPendingMsgPtr);
 		}
