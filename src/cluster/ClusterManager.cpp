@@ -205,8 +205,48 @@ void ClusterManager::initialize(int argc, char **argv)
 			// Processes in the initial world get _dataInit from the environment
 			_singleton->_dataInit._numMinNodes = ClusterManager::clusterSize();
 			_singleton->_dataInit._numMaxNodes = ClusterManager::clusterMaxSize();
+
+			// At this moment we will receive the hostnames as there is no simple way to get this
+			// info from the slurm api. We can use this information at some point to deduce the
+			// distribution polity
+			if (_singleton->_dataInit.clusterMalleabilityEnabled()) {
+				// TODO: if sometime we implement a collective operation, this may be implemented
+				// with a gather
+				ClusterNode *currentNode = ClusterManager::getCurrentClusterNode();
+
+				if (ClusterManager::isMasterNode()) {
+					// Master will receve the hostnames from all the processes
+					for (ClusterNode *it: ClusterManager::getClusterNodes()) {
+						char tmp[HOST_NAME_MAX];
+						if (it != currentNode) {
+							DataAccessRegion region(tmp, HOST_NAME_MAX * sizeof(char));
+							ClusterManager::fetchDataRaw(
+								region, it->getMemoryNode(), it->getIndex(), true, false
+							);
+							it->setHostName(tmp);
+						} else {
+							it->setHostName(hostname);
+						}
+					}
+
+					SlurmAPI::initialize();
+
+				} else {
+					// Share my hostname with master if I am in the initial world.
+					DataAccessRegion region(hostname, HOST_NAME_MAX * sizeof(char));
+					ClusterManager::sendDataRaw(
+						region,
+						ClusterManager::getMasterNode()->getMemoryNode(),
+						currentNode->getIndex(),
+						true, false
+					);
+				}
+			}
+
 		} else {
-			// Spawned processes wait for the _dataInit from master
+			// Spawned processes wait for the _dataInit from master. It doesn't sent any hostinfo
+			// because master should already know at the spawn moment (else, this is not the moment
+			// to get it... too late and the decision is made)
 			assert(!ClusterManager::isMasterNode());
 
 			DataAccessRegion region(&_singleton->_dataInit, sizeof(DataInitSpawn));
@@ -217,41 +257,6 @@ void ClusterManager::initialize(int argc, char **argv)
 			);
 
 			assert(_singleton->_dataInit.clusterMalleabilityEnabled());
-		}
-
-		ClusterNode *currentNode = ClusterManager::getCurrentClusterNode();
-
-		// After we have dataInit we know if malleability is enabled, not before.
-		if (_singleton->_dataInit.clusterMalleabilityEnabled()) {
-			// TODO: if sometime we implement a collective operation, this may be implemented with a
-			// gather
-			if (ClusterManager::isMasterNode()) {
-				// Master will receve the hostnames from all the processes
-				for (ClusterNode *it: ClusterManager::getClusterNodes()) {
-					char tmp[HOST_NAME_MAX];
-					if (it != currentNode) {
-						DataAccessRegion region(tmp, HOST_NAME_MAX * sizeof(char));
-						ClusterManager::fetchDataRaw(
-							region, it->getMemoryNode(), it->getIndex(), true, false
-						);
-						it->setHostName(tmp);
-					} else {
-						it->setHostName(hostname);
-					}
-				}
-
-				SlurmAPI::initialize();
-
-			} else {
-				// Share my hostname with master.
-				DataAccessRegion region(hostname, HOST_NAME_MAX * sizeof(char));
-				ClusterManager::sendDataRaw(
-					region,
-					ClusterManager::getMasterNode()->getMemoryNode(),
-					currentNode->getIndex(),
-					true, false
-				);
-			}
 		}
 
 	} else {
@@ -445,6 +450,9 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 	const size_t nEntries = msgSpawn->getNEntries();
 	assert(nEntries > 0);
 
+	const MessageSpawnHostInfo *entries = msgSpawn->getEntries();
+	assert(entries != nullptr);
+
 	int spawned = 0;
 	for (size_t ent = 0; ent < nEntries; ++ent) {
 		if (ent > 0) {
@@ -456,88 +464,72 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 		// spawn also in case they are created as intermediate processes.  This method is the only
 		// one fully compatible with all the mpi implementations and with the efficiency of
 		// performing everything with a minimal number of messages.
-		const MessageSpawnHostInfo &info = msgSpawn->getEntries()[ent];
+		const MessageSpawnHostInfo &info = entries[ent];
 
 
 		const std::string hostname(info.hostname);
-		const size_t nprocs = info.nprocs;
-		const int lastSize = ClusterManager::clusterSize();
 
-		assert(lastSize == oldSize + spawned);
+		assert(ClusterManager::clusterSize() == oldSize + spawned);
 
-		// TODO: This may be changed with a loop to spawn with granularity one and then allow
-		// completely free shrinking without size contrains.
-		// 1. The spawn one by one may take significant more time than spawning in groups
-		// 2. This compulsively needs SLURM_OVERCOMMIT to be disabled.
-		newSize = _singleton->_msn->messengerSpawn(nprocs, hostname);
+		for (size_t step = 0; step < info.nprocs; ++step) {
 
-		// Register the new nodes and their memory
-		for (int i = lastSize; i < newSize; ++i) {
-			ClusterNode *node = new ClusterNode(i, i, 0, false, i);
+			// TODO: This may be changed with a loop to spawn with granularity one and then allow
+			// completely free shrinking without size constrains.
+			// 1. The spawn one by one may take significant more time than spawning in groups
+			// 2. This compulsively needs SLURM_OVERCOMMIT to be disabled.
+
+			newSize = _singleton->_msn->messengerSpawn(1, hostname);
+
+			const int newindex = oldSize + spawned;
+
+			// Register the new nodes and their memory
+			ClusterNode *node = new ClusterNode(newindex, newindex, 0, false, newindex);
+			node->setHostName(hostname);
+
+			assert(node != nullptr);
+
 			_singleton->_clusterNodes.push_back(node);
 			VirtualMemoryManagement::registerNodeLocalRegion(node);
-		}
-		assert(ClusterManager::clusterSize() == newSize);
-		spawned += nprocs;
+			assert(ClusterManager::clusterSize() == newSize);
+			++spawned;
 
-		if (ClusterManager::isMasterNode()) {
-			// Then master sends the init message to the new processes. We need to send a separate
-			// message to inform the new processes that the spawn is not finished because the
-			// ClusterManager::sendDataRaw and its counter part expect a fixed size message and the
-			// polling services on the new nodes are not running yet either.
-			MessageSpawn *msgSpawn_i = nullptr;
-
-			// create a temporal message with spawn instructions from ent + 1 -> nEntries for the
-			// new processes created in this iteration only.
-			const size_t nextEnt = ent + 1;
-			const int pending = delta - spawned;
-			assert(pending >= 0);         // We never spawn more processes than delta
-			if (nextEnt < nEntries) {
-				assert(pending > 0);      // We still have processes to spawn
-				msgSpawn_i = new MessageSpawn(
-					pending, nEntries - nextEnt, &msgSpawn->getEntries()[nextEnt]
-				);
-			}
-
-			// TODO: All these messages are blocking; we may improve this code to make it async. The
-			// eassiest way may be to modify the messages to have a reference counter and
-			// ClusterPollingServices::PendingQueue<Message>::addPending to search in the pending
-			// queue for this message.
-			// We could also make the setMessengerData to have a list
-			DataAccessRegion init_region((void *)&_singleton->_dataInit, sizeof(DataInitSpawn));
-
-			for (int i = lastSize; i < newSize; ++i) {
-				ClusterNode *target = ClusterManager::getClusterNode(i);
-				assert(target != nullptr);
-				assert(target->getMemoryNode() != nullptr);
+			if (ClusterManager::isMasterNode()) {
+				// TODO: All these messages are blocking; we may improve this code to make it
+				// async. The easiest way may be to modify the messages to have a reference counter
+				// and ClusterPollingServices::PendingQueue<Message>::addPending to search in the
+				// pending queue for this message.
+				// We could also make the setMessengerData to have a list
+				DataAccessRegion init_region((void *)&_singleton->_dataInit, sizeof(DataInitSpawn));
+				assert(node->getMemoryNode() != nullptr);
 
 				// Send init message
 				ClusterManager::sendDataRaw(
-					init_region, target->getMemoryNode(), std::numeric_limits<int>::max(), true
+					init_region, node->getMemoryNode(), std::numeric_limits<int>::max(), true
 				);
 
-				// Get hostname info form the new process
-				char tmp[HOST_NAME_MAX];
-				DataAccessRegion region(tmp, HOST_NAME_MAX * sizeof(char));
-				ClusterManager::fetchDataRaw(
-					region, target->getMemoryNode(), target->getIndex(), true, false
-				);
-				target->setHostName(tmp);
-				SlurmAPI::deltaProcessToHostname(tmp, 1);
-
-				// Send dmallocs now very early and before the spawn order
+				// Send dmallocs now very early and before the spawn message. Blocking is required.
 				if (msgDmallocInfo != nullptr) {
-					ClusterManager::sendMessage(msgDmallocInfo, target, true);
+					ClusterManager::sendMessage(msgDmallocInfo, node, true);
 				}
 
-				// After the init we need to send the rest of the spawn to the new processes created
-				// in this iteration, so we can continue to the next iteration.
-				if (msgSpawn_i != nullptr) {
-					ClusterManager::sendMessage(msgSpawn_i, target, true);
+				// Then master sends the init message to the new processes. We need to send a
+				// separate message to inform the new processes that the spawn is not finished
+				// because the ClusterManager::sendDataRaw and its counter part expect a fixed size
+				// message and the polling services on the new nodes are not running yet either.
+				std::vector<MessageSpawnHostInfo> spawns(&entries[ent], &entries[ent] + (nEntries - ent));
+				assert(spawns[0].nprocs > 0);
+				if (--spawns[0].nprocs == 0) {
+					spawns.erase(spawns.begin());
 				}
 
+				if (spawns.size() > 0) {
+					assert(delta - spawned > 0);
+					MessageSpawn msgSpawn_i(delta - spawned, spawns);
+					ClusterManager::sendMessage(&msgSpawn_i, node, true);
+				}
+
+				SlurmAPI::deltaProcessToHostname(hostname, 1);
 			}
-			delete msgSpawn_i;
 		}
 	}
 
