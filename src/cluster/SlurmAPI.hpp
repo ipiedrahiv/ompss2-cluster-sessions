@@ -370,6 +370,19 @@ private:
 		return initialNHosts - _hostInfoVector.size();
 	}
 
+	void killJobRequestIfPending()
+	{
+		if (_slurmPendingMsgPtr != nullptr) {
+			// This should never happen, but you know... never say never to a paranoiac
+			FatalErrorHandler::warn("There is a Slurm allocation pending, needed cancelation");
+
+			int rc = slurm_kill_job(_slurmPendingMsgPtr->job_id, SIGKILL, 0);
+			SlurmAPI::failIf(rc != SLURM_SUCCESS, "slurm_kill_job in destructor returned: ", rc);
+
+			slurm_free_resource_allocation_response_msg(_slurmPendingMsgPtr);
+		}
+	}
+
 
 	// This is a policy to spawn the new processes. Distributions may be implemented here. We
 	// receive here the number of extra nodes we want to spawn and the function returns a vector of 
@@ -499,17 +512,7 @@ private:
 
 	~SlurmAPI()
 	{
-		// TODO: This code may be needed to call on failures with assertions or fail_if.
-		if (_slurmPendingMsgPtr != nullptr) {
-			// This should never happen, but you know... never say never to a paranoiac
-			FatalErrorHandler::warn("There is a Slurm allocation pending, needed cancelation");
-
-			int rc = slurm_kill_job(_slurmPendingMsgPtr->job_id, SIGKILL, 0);
-			SlurmAPI::failIf(rc != SLURM_SUCCESS, "slurm_kill_job in destructor returned: ", rc);
-
-			slurm_free_resource_allocation_response_msg(_slurmPendingMsgPtr);
-		}
-
+		killJobRequestIfPending();
 		assert(_jobInfoMsg != nullptr);
 		slurm_free_job_info_msg(_jobInfoMsg);
 		slurm_fini();
