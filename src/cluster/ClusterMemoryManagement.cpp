@@ -4,6 +4,7 @@
 	Copyright (C) 2019 Barcelona Supercomputing Center (BSC)
 */
 
+#include <ClusterUtil.hpp>
 #include "ClusterManager.hpp"
 #include "ClusterMemoryManagement.hpp"
 #include "executors/threads/WorkerThread.hpp"
@@ -19,9 +20,8 @@
 ClusterMemoryManagement ClusterMemoryManagement::_singleton;
 
 // Register a dmalloc by putting it on the list and registering the allocation with the directory.
-void ClusterMemoryManagement::registerDmalloc(
-	const DmallocDataInfo *dmallocDataInfo, Task *task, size_t clusterSize
-) {
+void ClusterMemoryManagement::registerDmalloc(const DmallocDataInfo *dmallocDataInfo, Task *task)
+{
 	DmallocDataInfo *ptr = (DmallocDataInfo *) malloc(dmallocDataInfo->getSize());
 	assert(ptr != nullptr);
 
@@ -34,7 +34,7 @@ void ClusterMemoryManagement::registerDmalloc(
 	_dmallocs.emplace_back(ptr);
 
 	// Now register the allocation with the directory.
-	ClusterDirectory::registerAllocation(dmallocDataInfo, task, clusterSize);
+	ClusterDirectory::registerAllocation(dmallocDataInfo, task);
 
 	Directory::writeUnlock();
 }
@@ -77,7 +77,8 @@ void ClusterMemoryManagement::redistributeDmallocs(size_t newsize)
 	Directory::writeLock();
 	for (DmallocDataInfo *dmalloc : _singleton._dmallocs) {
 		ClusterDirectory::unregisterAllocation(dmalloc->_region);
-		ClusterDirectory::registerAllocation(dmalloc, nullptr, newsize);
+		dmalloc->_clusterSize = newsize; // update the allocation size now.
+		ClusterDirectory::registerAllocation(dmalloc, nullptr);
 	}
 	Directory::writeUnlock();
 }
@@ -96,7 +97,7 @@ void ClusterMemoryManagement::handleDmallocMessage(const MessageDmalloc *msg, Ta
 		//! Register region in the home node map This call adds the region to the list of Dmallocs
 		//! that are automatically rebalanced and registers it with the cluster directory. Note that
 		//! it is only registered in cluster mode.
-		ClusterMemoryManagement::_singleton.registerDmalloc(dataInfo, task, dataInfo->_clusterSize);
+		ClusterMemoryManagement::_singleton.registerDmalloc(dataInfo, task);
 	}
 
 	if (msg->getType() == DMALLOC) {

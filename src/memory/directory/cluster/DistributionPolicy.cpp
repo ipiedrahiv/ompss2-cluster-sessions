@@ -97,9 +97,8 @@ namespace ClusterDirectory {
 		assert(ptr == (char*)address + size);
 	}
 
-	void registerAllocation(
-		const ClusterMemoryManagement::DmallocDataInfo *dmallocInfo, Task *task, size_t clusterSize
-	) {
+	void registerAllocation(const ClusterMemoryManagement::DmallocDataInfo *dmallocInfo, Task *task)
+	{
 		// If numa.tracking is set to "auto", then a dmalloc enables NUMA tracking on all nodes
 		bool useNUMA = dmallocUsesNUMA();
 
@@ -115,8 +114,7 @@ namespace ClusterDirectory {
 		switch (dmallocInfo->_policy) {
 			case nanos6_equpart_distribution:
 				assert(dmallocInfo->_nrDim == 0);
-
-				registerAllocationEqupart(dmallocInfo->_region, clusterSize, useNUMA);
+				registerAllocationEqupart(dmallocInfo->_region, dmallocInfo->_clusterSize, useNUMA);
 				break;
 			case nanos6_block_distribution:
 			case nanos6_cyclic_distribution:

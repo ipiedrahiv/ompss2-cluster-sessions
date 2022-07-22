@@ -47,16 +47,9 @@ MessageDmalloc::MessageDmalloc(const ClusterMemoryManagement::dmalloc_container_
 	for (const ClusterMemoryManagement::DmallocDataInfo *it : dmallocs) {
 		_content->getOffsetPtr()[i] = offset;
 		ClusterMemoryManagement::DmallocDataInfo *data = _content->getData(i);
-
-		new (data) ClusterMemoryManagement::DmallocDataInfo(
-			it->_region,
-			it->_clusterSize,
-			it->_policy,
-			it->_nrDim,
-			it->_dimensions
-		);
-
 		assert(it->getSize() == data->getSize());
+
+		memcpy(data, it, data->getSize());
 
 		offset += it->getSize();
 		++i;
