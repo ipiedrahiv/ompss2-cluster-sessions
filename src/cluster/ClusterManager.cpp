@@ -412,8 +412,7 @@ void ClusterManager::fetchVector(
 
 	assert(index == nFragments);
 	ClusterPollingServices::PendingQueue<DataTransfer>::addPendingVector(temporal);
-
-	_singleton->_msn->sendMessage(msg, remoteNode);
+	ClusterManager::sendMessage(msg, remoteNode);
 }
 
 // SPAWN
@@ -457,7 +456,7 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 	for (size_t ent = 0; ent < nEntries; ++ent) {
 		if (ent > 0) {
 			// This to match with new processes just coming and stopping polling services
-			ClusterManager::synchronizeAll(); 
+			ClusterManager::synchronizeAll();
 		}
 		// Spawn entries are basically the following spawn steps. As we send a single message with
 		// all the spawn steps to perform. Apart form that the new processes will be informed to
@@ -466,17 +465,11 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 		// performing everything with a minimal number of messages.
 		const MessageSpawnHostInfo &info = entries[ent];
 
-
 		const std::string hostname(info.hostname);
 
 		assert(ClusterManager::clusterSize() == oldSize + spawned);
 
 		for (size_t step = 0; step < info.nprocs; ++step) {
-
-			// TODO: This may be changed with a loop to spawn with granularity one and then allow
-			// completely free shrinking without size constrains.
-			// 1. The spawn one by one may take significant more time than spawning in groups
-			// 2. This compulsively needs SLURM_OVERCOMMIT to be disabled.
 
 			newSize = _singleton->_msn->messengerSpawn(1, hostname);
 
@@ -570,6 +563,7 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 	// BEFORE any resize step.
 	const int oldIndex = _singleton->_msn->getNodeIndex();
 	const int oldSize = ClusterManager::clusterSize();
+	assert(oldSize + delta > 0);
 
 	const MessageShrinkDataInfo *dataInfos = msgShrink->getEntries();
 	std::vector<DataTransfer *> transferList;
@@ -618,6 +612,7 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 
 	// messenger shrink returns zero on the dying nodes.
 	const int newSize = _singleton->_msn->messengerShrink(delta);
+	assert(newSize >= 0); // negative means error
 
 	if (newSize > 0) { // Condition for surviving nodes
 		WriteIDManager::limitWriteIDToMaxNodes(newSize);
@@ -864,11 +859,10 @@ int ClusterManager::nanos6Resize(int delta)
 
 		ClusterManager::sendMessageToAll(&msgShrink, true);
 
-		__attribute__((unused)) const int newSize
-			= ClusterManager::handleResizeMessage(&msgShrink);
-		assert(newSize == expectedSize || newSize == 0); // zero for dying nodes
+		newSize = ClusterManager::handleResizeMessage(&msgShrink);
+		assert(newSize == expectedSize);
 
-		if (SlurmAPI:: permitsExpansion()) {
+		if (SlurmAPI::permitsExpansion()) {
 			// We don't want to (really) release the hosts back to slurm IF permitsExpansion is
 			// disabled, because it may be impossible to reallocate them back in the future.
 			const int releasedHosts = SlurmAPI::releaseUnusedHosts();

@@ -308,13 +308,24 @@ public:
 		_singleton->_msn->sendMessage(msg, recipient, block);
 	}
 
-	static inline void sendMessageToAll(Message *msg, bool block = false)
-	{
+	static inline void sendMessageToAll(
+		Message *msg, bool block = false,
+		size_t first = 0, size_t last = std::numeric_limits<short>::max()
+	) {
 		assert(_singleton != nullptr);
 		assert(_singleton->_msn != nullptr);
 		assert(msg != nullptr);
 
-		for (ClusterNode *node : _singleton->_clusterNodes) {
+		if (last == std::numeric_limits<short>::max()) {
+			last = _singleton->_clusterNodes.size();
+		}
+
+		assert(last <= _singleton->_clusterNodes.size());
+
+		for (size_t i = first; i < last; ++i) {
+
+			ClusterNode *node = ClusterManager::getClusterNode(i);
+
 			// Not send to myself and avoid ping-pong.
 			if (node == _singleton->_thisNode || msg->getSenderId() == node->getIndex()) {
 				continue;
