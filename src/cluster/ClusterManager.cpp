@@ -747,7 +747,7 @@ int ClusterManager::nanos6Resize(int delta)
 		TaskDataAccesses &accessStructures = currentTask->getDataAccesses();
 
 		// Here we must construct the accesses
-		std::vector<MessageShrinkDataInfo> shrinkDataInfo(oldSize);
+		std::vector<MessageShrinkDataInfo> shrinkDataInfo;
 		int tag = 1;
 
 		accessStructures._accesses.processAll(
