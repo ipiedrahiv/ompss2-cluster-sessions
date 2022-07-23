@@ -18,6 +18,7 @@
 #include "MPIErrorHandler.hpp"
 #include "MessageId.hpp"
 
+#include <SlurmAPI.hpp>
 #include <ClusterManager.hpp>
 #include <ClusterNode.hpp>
 #include <MemoryAllocator.hpp>
@@ -584,6 +585,20 @@ void MPIMessenger::synchronizeAll(void)
 	Instrument::MPIUnLock();
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 }
+
+void MPIMessenger::abortAll(int errcode)
+{
+	// TODO: This is a partial solution to reduce the real issue. If this failure happens in a
+	// remote process (not master) then the job is not killed because only master knows about the
+	// allocations and master will die with MPI_Abort. 
+	if (SlurmAPI::isEnabled()) {
+		SlurmAPI::killJobRequestIfPending();
+	}
+
+	std::lock_guard<SpinLock> guard(_abortLock);
+	MPI_Abort(INTRA_COMM, errcode);
+}
+
 
 Message *MPIMessenger::checkMail(void)
 {

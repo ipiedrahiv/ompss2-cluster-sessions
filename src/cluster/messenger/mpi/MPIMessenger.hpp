@@ -160,11 +160,7 @@ public:
 
 	void synchronizeAll(void) override;
 
-	inline void abortAll(int errcode) override
-	{
-		std::lock_guard<SpinLock> guard(_abortLock);
-		MPI_Abort(INTRA_COMM, errcode);
-	}
+	void abortAll(int errcode) override;
 
 	void synchronizeWorld(void) override;
 

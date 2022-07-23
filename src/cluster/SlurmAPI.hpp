@@ -370,7 +370,7 @@ private:
 		return initialNHosts - _hostInfoVector.size();
 	}
 
-	void killJobRequestIfPending()
+	void killJobRequestIfPendingPrivate()
 	{
 		if (_slurmPendingMsgPtr != nullptr) {
 			// This should never happen, but you know... never say never to a paranoiac
@@ -512,7 +512,7 @@ private:
 
 	~SlurmAPI()
 	{
-		killJobRequestIfPending();
+		killJobRequestIfPendingPrivate();
 		assert(_jobInfoMsg != nullptr);
 		slurm_free_job_info_msg(_jobInfoMsg);
 		slurm_fini();
@@ -602,6 +602,12 @@ public:
 	{
 		assert(_singleton != nullptr);
 		return _singleton->_permitsExpansion;
+	}
+
+	static void killJobRequestIfPending()
+	{
+		assert(_singleton != nullptr);
+		_singleton->killJobRequestIfPendingPrivate();
 	}
 
 };
