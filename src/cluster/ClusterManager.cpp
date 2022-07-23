@@ -432,18 +432,6 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 		ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
 	}
 
-	MessageDmalloc *msgDmallocInfo = nullptr;
-	if (ClusterManager::isMasterNode()) {
-		// Share the existing dmallocs with the new processes.
-		const ClusterMemoryManagement::dmalloc_container_t &mallocsList
-			= ClusterMemoryManagement::getMallocsList();
-
-		if (mallocsList.size() > 0) {
-			msgDmallocInfo = new MessageDmalloc(mallocsList);
-		}
-	}
-
-
 	const int delta = msgSpawn->getDeltaNodes();
 	assert(delta > 0);
 	const size_t nEntries = msgSpawn->getNEntries();
@@ -500,11 +488,6 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 					init_region, node->getMemoryNode(), std::numeric_limits<int>::max(), true
 				);
 
-				// Send dmallocs now very early and before the spawn message. Blocking is required.
-				if (msgDmallocInfo != nullptr) {
-					ClusterManager::sendMessage(msgDmallocInfo, node, true);
-				}
-
 				// Then master sends the init message to the new processes. We need to send a
 				// separate message to inform the new processes that the spawn is not finished
 				// because the ClusterManager::sendDataRaw and its counter part expect a fixed size
@@ -526,16 +509,17 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 		}
 	}
 
-	if (msgDmallocInfo) {
-		delete msgDmallocInfo;
-	}
-
 	const int newIndex = _singleton->_msn->getNodeIndex();
 	FatalErrorHandler::failIf(newIndex != oldIndex,
 		"Index changed after spawn: ", oldIndex, " -> ", newIndex);
 
 	assert(newSize == oldSize + delta);
 	assert (newSize > 1);
+
+	// Will redistribute at the end because we need to have all the new hosts.  Only the old
+	// processes will do something useful here. The just spawned ones will receive an updated
+	// dmalloc info messages latter from master.
+	ClusterMemoryManagement::redistributeDmallocs(newSize);
 
 	// Restart the services
 	ClusterServicesPolling::initialize();
@@ -639,6 +623,10 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 		}
 		_singleton->_clusterNodes.resize(newSize);
 
+		if (!ClusterManager::isMasterNode) {
+			ClusterMemoryManagement::redistributeDmallocs(newSize);
+		}
+
 		ClusterManager::synchronizeAll();
 
 	} else {           // newSize is zero when this is a dying rank.
@@ -697,9 +685,14 @@ int ClusterManager::nanos6Resize(int delta)
 
 	TaskWait::taskWait("nanos6Resize");
 
+	int newSize = -1;
+
 	if (delta > 0) {
 		// Check slurm for allocations.
 		if (neededNewHosts > 0) {
+			// TODO: We can make a policy here. We could either wait for the allocation, with a loop
+			// and a timeout or fail or continue as nothing happened. We can either add an extra
+			// parameter to decide what to do.
 			const int allocatedNewHosts = SlurmAPI::checkAllocationRequest();
 
 			// TODO: Manage correctly the error cases: ==0; <0; or >0;
@@ -723,16 +716,31 @@ int ClusterManager::nanos6Resize(int delta)
 
 		// this is the same call that message handler does. So any improvement in resize will be
 		// done in nanos6Spawn not here because that will be executed by all the processes.
-		const int newSize = ClusterManager::handleResizeMessage(&msgSpawn);
+		newSize = ClusterManager::handleResizeMessage(&msgSpawn);
 
 		FatalErrorHandler::failIf(
 			newSize != expectedSize,
 			"Couldn't spawn: ", expectedSize, " new processes; only: ", newSize, " were created."
 		);
 
+		// Share the dmallocs with the new processes... there is a potential issue here. It may be
+		// too late as the remote processes may have even performed some spawns... but no dmallocs
+		// are performed during that process.
+		// Redistribution in master was made with all the other initial processes at the end of
+		// handleResizeMessage
+		const ClusterMemoryManagement::dmalloc_container_t &mallocsList
+			= ClusterMemoryManagement::getMallocsList();
+
+		if (mallocsList.size() > 0) {
+			MessageDmalloc msgDmallocInfo(mallocsList);
+			ClusterManager::sendMessageToAll(&msgDmallocInfo, true, oldSize, newSize);
+		}
+
+
 	} else if (delta < 0) {
 		// This needs to take place before because we use the new home node information to
-		// redistribute data latter.
+		// redistribute data in the migration. the other processes will do this as soon as they get
+		// into the handle message
 		ClusterMemoryManagement::redistributeDmallocs(expectedSize);
 
 		// Process accesses fragments
