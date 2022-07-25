@@ -25,6 +25,7 @@ class Serialize {
 		size_t _process;
 		size_t _id;
 		bool _isSerialize;
+		const DataAccessRegion _sentinelRegion;
 		const size_t _numRegions;
 		DataAccessRegion _regionsDeps[];
 
@@ -35,9 +36,11 @@ class Serialize {
 			size_t process,
 			size_t id,
 			bool isSerialize,
+			int *sentinel,
 			const regionSet &inputs
 		) : _task(task), _fullRegion(fullRegion), _nodeIdx(nodeIdx),
-			_process(process), _id(id), _isSerialize(isSerialize), _numRegions(inputs.size())
+			_process(process), _id(id), _isSerialize(isSerialize),
+			_sentinelRegion(sentinel, sizeof(int)), _numRegions(inputs.size())
 		{
 			std::copy(inputs.begin(), inputs.end(), _regionsDeps);
 		}
@@ -50,6 +53,8 @@ class Serialize {
 
 	// Get a vector with sets for all the regions and their homeNode
 	static std::vector<regionSet> getHomeRegions(const DataAccessRegion &region);
+
+	static int *sentinel;
 
 public:
 	// Static types for task

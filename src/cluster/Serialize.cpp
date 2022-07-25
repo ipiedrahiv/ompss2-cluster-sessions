@@ -16,6 +16,7 @@
 #include <ClusterManager.hpp>
 #include <DataAccessRegion.hpp>
 #include <VirtualMemoryManagement.hpp>
+#include <ClusterMemoryManagement.hpp>
 
 #include <mpi.h>
 #include "src/cluster/messenger/mpi/MPIErrorHandler.hpp"
@@ -23,6 +24,8 @@
 #include <sys/stat.h>
 
 #include <ClusterUtil.hpp>
+
+int *Serialize::sentinel = nullptr;
 
 void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t *)
 {
@@ -39,9 +42,6 @@ void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t 
 
 	MPI_File fh;
 	const std::string filename = Serialize::getFilename(serializeArgs);
-
-	// TODO: Move this to the messenger or similes
-	ClusterManager::synchronizeAll();
 
 	int rc = MPI_File_open(MPI_COMM_WORLD, filename.c_str(), mode, MPI_INFO_NULL, &fh);
 	MPIErrorHandler::handle(rc, MPI_COMM_WORLD, "from MPI_File_open");
@@ -69,10 +69,9 @@ void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t 
 				MPIErrorHandler::handle(rc, MPI_COMM_WORLD, "from MPI_File_read_at");
 			}
 		}
-
 		free(statuses);
-
 	}
+
 	rc = MPI_File_close(&fh);
 	MPIErrorHandler::handle(rc, MPI_COMM_WORLD, "from MPI_File_close");
 }
@@ -85,6 +84,18 @@ void Serialize::registerDependencies(void *arg, void *, void *)
 	// READ_ACCESS_TYPE for serialize, WRITE_ACCESS_TYPE for opposite
 	const DataAccessType accessType
 		= serializeArgs->_isSerialize ? READ_ACCESS_TYPE : WRITE_ACCESS_TYPE;
+
+	// Register the sentinel, required because only one MPI_File_Open can be called at the time.
+	// MPI is so dumb that it can break just cross opening files (specially for reading).
+	DataAccessRegistration::registerTaskDataAccess(
+		serializeArgs->_task,
+		READWRITE_ACCESS_TYPE,
+		false,                          // weak
+		serializeArgs->_sentinelRegion, // region
+		0,                              // Symbol index... not sure
+		no_reduction_type_and_operator,
+		no_reduction_index
+	);
 
 	for (size_t i = 0; i < serializeArgs->_numRegions; ++i) {
 		DataAccessRegistration::registerTaskDataAccess(
@@ -165,15 +176,21 @@ std::vector<Serialize::regionSet> Serialize::getHomeRegions(const DataAccessRegi
 int Serialize::serializeRegion(
 	const DataAccessRegion &region, size_t process, size_t id, bool serialize
 ) {
-	// A no flush taskwait
-	// TaskWait::taskWait("(De)Serialization", false, true);
-
 	// Attempt to create the directory if it does not exist.
 	if (mkdir(std::to_string(process).c_str(), 0777) == 0) {
 		std::cerr << "Serialization directory created: " << std::to_string(process) << std::endl;
 	}
 
 	std::vector<regionSet> dependencies = Serialize::getHomeRegions(region);
+	assert(dependencies.size() == (size_t) ClusterManager::clusterSize());
+
+	// TaskWait::taskWait("(De)Serialization", false, true);
+	// TODO: Modify this for malleability.
+	// TODO: Solve the memory leak created here with initialize-finalize
+	if (Serialize::sentinel == nullptr) {
+		Serialize::sentinel
+			= (int *)ClusterMemoryManagement::lmalloc(ClusterManager::clusterSize() * sizeof(int));
+	}
 
 	WorkerThread *workerThread = WorkerThread::getCurrentWorkerThread();
 	assert(workerThread != nullptr);
@@ -201,7 +218,9 @@ int Serialize::serializeRegion(
 		SerializeArgs *args = reinterpret_cast<SerializeArgs *>(task->getArgsBlock());
 		assert(args != nullptr);
 
-		new (args) SerializeArgs(task, region, nodeIdx, process, id, serialize, taskRegions);
+		new (args) SerializeArgs(
+			task, region, nodeIdx, process, id, serialize, &Serialize::sentinel[nodeIdx], taskRegions
+		);
 
 		AddTask::submitTask(task, parent, false);
 	}
