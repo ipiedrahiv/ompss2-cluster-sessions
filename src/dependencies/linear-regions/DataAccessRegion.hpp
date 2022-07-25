@@ -69,6 +69,10 @@ public:
 		return (_startAddress != other._startAddress) || (_length != other._length);
 	}
 
+	bool operator<(DataAccessRegion const &other) const
+	{
+		return _startAddress < other._startAddress;
+	}
 
 	void *getStartAddress() const
 	{

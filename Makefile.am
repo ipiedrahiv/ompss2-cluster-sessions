@@ -465,6 +465,7 @@ cluster_sources =
 if USE_CLUSTER
 cluster_sources += \
 	src/cluster/ClusterManager.cpp \
+	src/cluster/Serialize.cpp \
 	src/cluster/NodeNamespace.cpp \
 	src/cluster/ClusterMemoryManagement.cpp \
 	src/cluster/ClusterMetrics.cpp \
@@ -1360,6 +1361,7 @@ noinst_HEADERS += \
 	src/cluster/ClusterMemoryManagement.hpp \
 	src/cluster/NodeNamespace.hpp \
 	src/cluster/WriteID.hpp \
+	src/cluster/Serialize.hpp \
 	src/cluster/messages/Message.hpp \
 	src/cluster/messages/MessageType.hpp \
 	src/cluster/messages/MessageDataFetch.hpp \

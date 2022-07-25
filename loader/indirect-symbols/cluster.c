@@ -271,3 +271,16 @@ int nanos6_cluster_resize(int delta)
 
 	return (*symbol)(delta);
 }
+
+int nanos6_serialize(void *start, size_t nbytes, size_t process, size_t id, int checkpoint)
+{
+	typedef int nanos6_serialize_t(void *, size_t, size_t, size_t, int);
+
+	static nanos6_serialize_t *symbol = NULL;
+	if (__builtin_expect(symbol == NULL, 0)) {
+		symbol = (nanos6_serialize_t *) _nanos6_resolve_symbol("nanos6_serialize", "cluster", NULL);
+	}
+
+	return (*symbol)(start, nbytes, process, id, checkpoint);
+}
+

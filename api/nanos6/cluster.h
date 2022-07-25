@@ -145,6 +145,16 @@ int nanos6_get_app_communicator(void *);
 //! \returns Same value than delta on success.
 int nanos6_cluster_resize(int delta);
 
+//! \brief Create or recover checkpoint info
+//!
+//! \param[in] start Address pointer to start
+//! \param[in] nbytes Obvious
+//! \param[in] process Id if the previous process to recover
+//! \param[in] id Variable id must be unique inside the program for C&R
+//! \param[in] checkpoint true to save, false to recover.
+int nanos6_serialize(void *start, size_t nbytes, size_t process, size_t id, int checkpoint);
+
+
 #ifdef __cplusplus
 }
 #endif

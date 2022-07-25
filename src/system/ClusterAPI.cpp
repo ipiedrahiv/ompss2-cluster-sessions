@@ -9,10 +9,10 @@
 #include <ClusterManager.hpp>
 #include <ClusterMemoryManagement.hpp>
 #include <ClusterNode.hpp>
+#include <Serialize.hpp>
 #include "tasks/Task.hpp"
 #include "executors/threads/WorkerThread.hpp"
 #include "lowlevel/FatalErrorHandler.hpp"
-
 
 extern "C" {
 
@@ -125,4 +125,10 @@ extern "C" {
 		return 0;
 	}
 
+	int nanos6_serialize(void *start, size_t nbytes, size_t process, size_t id, int checkpoint)
+	{
+		DataAccessRegion region(start, nbytes);
+
+		return Serialize::serializeRegion(region, process, id, (bool) checkpoint);
+	}
 }
