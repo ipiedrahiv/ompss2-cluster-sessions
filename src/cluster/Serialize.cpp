@@ -50,7 +50,7 @@ void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t 
 {
 	assert(arg != nullptr);
 
-	SerializeArgs *const serializeArgs = reinterpret_cast<SerializeArgs *const>(arg);
+	const SerializeArgs *const serializeArgs = reinterpret_cast<SerializeArgs *const>(arg);
 	assert(serializeArgs != nullptr);
 	assert(serializeArgs->_nodeIdx == ClusterManager::getCurrentClusterNode()->getCommIndex());
 
@@ -79,6 +79,22 @@ void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t 
 	int rc = MPI_File_open(intracom, filename.c_str(), mode, MPI_INFO_NULL, &fh);
 	MPIErrorHandler::handle(rc, intracom, "from MPI_File_open");
 
+	// When deserializing, the file should have the same size than the full region, otherwise there
+	// will be a nasty error latter.
+	if (isSerialize == false && ClusterManager::isMasterNode()) {
+		MPI_Offset fSize = 0;
+		rc = MPI_File_get_size(fh, &fSize);
+		MPIErrorHandler::handle(rc, intracom, "from MPI_File_open");
+
+		const size_t regionSize = serializeArgs->_fullRegion.getSize();
+
+		FatalErrorHandler::failIf(
+			(size_t) fSize != regionSize,
+			"Serialization file:", filename, " size:", fSize,
+			" but region:", serializeArgs->_fullRegion, " has size:", regionSize
+		);
+	}
+
 	if (nRegions > 0) {
 		const char *start = (char *) serializeArgs->_fullRegion.getStartAddress();
 
@@ -86,13 +102,14 @@ void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t 
 		assert(statuses != nullptr);
 
 		for (size_t i = 0; i < serializeArgs->_numRegions; ++i) {
-			// This asserts also that offset will be positive.
+			// This asserts also that offset will be non-negative.
 			assert(serializeArgs->_regionsDeps[i].fullyContainedIn(serializeArgs->_fullRegion));
+			assert(serializeArgs->_regionsDeps[i].getSize() < std::numeric_limits<int>::max());
 
-			void *start_i = serializeArgs->_regionsDeps[i].getStartAddress();
+			void * const start_i = serializeArgs->_regionsDeps[i].getStartAddress();
+			const int size = serializeArgs->_regionsDeps[i].getSize();
 
 			MPI_Offset offset = (char *)start_i - start;
-			int size = serializeArgs->_regionsDeps[i].getSize();
 
 			if (isSerialize) {
 				rc = MPI_File_write_at(fh, offset, start_i, size, MPI_BYTE, &statuses[i]);
@@ -198,7 +215,22 @@ std::vector<Serialize::regionSet> Serialize::getHomeRegions(const DataAccessRegi
 			DataAccessRegion subregion = region.intersect(entry->getAccessRegion());
 			assert(!subregion.empty());
 
-			dependencies[nodeId].insert(subregion);
+
+			char *currAddress = (char *) subregion.getStartAddress();
+			const char *endAddress = (char *) subregion.getEndAddress();
+
+			// We won't be capable to write more bytes than numeric_limits<int> because MPI receives
+			// an int as argument for size. From the OmpSs side (dependencies) we have the same
+			// problem, so the big dependencies and datatransfers will be fragmented in the
+			// MPIMessenger. Then it is simpler to just fragment them here in advance and we can be
+			// sure we are save for the future.
+			while (currAddress < endAddress) {
+				const size_t currSize
+					= std::min<size_t>(endAddress - currAddress, std::numeric_limits<int>::max());
+
+				dependencies[nodeId].emplace((void *)currAddress, currSize);
+				currAddress += currSize;
+			}
 		}
 		delete homeNodes;
 	}
