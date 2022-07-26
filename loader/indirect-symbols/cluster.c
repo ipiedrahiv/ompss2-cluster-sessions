@@ -284,3 +284,15 @@ int nanos6_serialize(void *start, size_t nbytes, size_t process, size_t id, int 
 	return (*symbol)(start, nbytes, process, id, checkpoint);
 }
 
+int nanos6_fail(const char message[])
+{
+	typedef int nanos6_fail_t(const char *);
+
+	static nanos6_fail_t *symbol = NULL;
+	if (__builtin_expect(symbol == NULL, 0)) {
+		symbol = (nanos6_fail_t *) _nanos6_resolve_symbol("nanos6_fail", "cluster", NULL);
+	}
+
+	(*symbol)(message);
+}
+

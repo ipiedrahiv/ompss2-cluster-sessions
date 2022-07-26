@@ -131,4 +131,15 @@ extern "C" {
 
 		return Serialize::serializeRegion(region, process, id, (bool) checkpoint);
 	}
+
+	void nanos6_fail(const char message[])
+	{
+		if (message != nullptr && message[0] != '\0') {
+			std::string reason = message;
+			FatalErrorHandler::fail(reason);
+		} else {
+			FatalErrorHandler::nanos6Abort();
+		}
+	}
+
 }

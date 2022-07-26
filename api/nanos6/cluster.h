@@ -154,6 +154,7 @@ int nanos6_cluster_resize(int delta);
 //! \param[in] checkpoint true to save, false to recover.
 int nanos6_serialize(void *start, size_t nbytes, size_t process, size_t id, int checkpoint);
 
+void nanos6_fail(const char message[]);
 
 #ifdef __cplusplus
 }
