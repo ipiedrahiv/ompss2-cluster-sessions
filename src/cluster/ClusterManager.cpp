@@ -442,10 +442,6 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 
 	int spawned = 0;
 	for (size_t ent = 0; ent < nEntries; ++ent) {
-		if (ent > 0) {
-			// This to match with new processes just coming and stopping polling services
-			ClusterManager::synchronizeAll();
-		}
 		// Spawn entries are basically the following spawn steps. As we send a single message with
 		// all the spawn steps to perform. Apart form that the new processes will be informed to
 		// spawn also in case they are created as intermediate processes.  This method is the only
@@ -458,6 +454,11 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 		assert(ClusterManager::clusterSize() == oldSize + spawned);
 
 		for (size_t step = 0; step < info.nprocs; ++step) {
+
+			if (spawned > 0) {
+				// This to match with new processes just coming and stopping polling services
+				ClusterManager::synchronizeAll();
+			}
 
 			newSize = _singleton->_msn->messengerSpawn(1, hostname);
 
@@ -494,7 +495,11 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 				// message and the polling services on the new nodes are not running yet either.
 				std::vector<MessageSpawnHostInfo> spawns(&entries[ent], &entries[ent] + (nEntries - ent));
 				assert(spawns[0].nprocs > 0);
-				if (--spawns[0].nprocs == 0) {
+
+				// discount the already spawned processes in this host (step + this one)
+				spawns[0].nprocs -= (step + 1);
+
+				if (spawns[0].nprocs == 0) {
 					spawns.erase(spawns.begin());
 				}
 
