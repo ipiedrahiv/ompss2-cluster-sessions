@@ -54,9 +54,27 @@ class Serialize {
 	// Get a vector with sets for all the regions and their homeNode
 	static std::vector<regionSet> getHomeRegions(const DataAccessRegion &region);
 
-	static int *sentinel;
+	const size_t _nSentinels;
+	int *_sentinels;
+
+	static Serialize *_singleton;
+
+	Serialize(int clusterMaxSize);
+
+	~Serialize();
 
 public:
+
+	// Only finalize if it was already initialized. This is not called at the moment because we
+	// don't have a proper place to do it yet.
+	static void tryFinalize()
+	{
+		if (_singleton != nullptr) {
+			delete _singleton;
+			_singleton = nullptr;
+		}
+	}
+
 	// Static types for task
 	static nanos6_task_invocation_info_t invocationInfo;
 	static nanos6_task_implementation_info_t implementationsSerialize;

@@ -314,6 +314,11 @@ public:
 		assert(_wrank >= 0);
 		return (PARENT_COMM != MPI_COMM_NULL);
 	}
+
+	MPI_Comm getCommunicator() const
+	{
+		return INTRA_COMM;
+	}
 };
 
 //! Register MPIMessenger with the object factory

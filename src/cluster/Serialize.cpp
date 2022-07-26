@@ -7,6 +7,7 @@
 #include "Serialize.hpp"
 
 #include <map>
+#include <mpi.h>
 
 #include "system/ompss/AddTask.hpp"
 #include "system/ompss/TaskWait.hpp"
@@ -17,15 +18,33 @@
 #include <DataAccessRegion.hpp>
 #include <VirtualMemoryManagement.hpp>
 #include <ClusterMemoryManagement.hpp>
-
-#include <mpi.h>
-#include "src/cluster/messenger/mpi/MPIErrorHandler.hpp"
-
-#include <sys/stat.h>
-
 #include <ClusterUtil.hpp>
 
-int *Serialize::sentinel = nullptr;
+#include <messenger/mpi/MPIMessenger.hpp>
+
+#include "src/cluster/messenger/mpi/MPIErrorHandler.hpp"
+
+#include <sys/stat.h> // for mkdir
+
+
+Serialize *Serialize::_singleton = nullptr;
+
+Serialize::Serialize(int clusterMaxSize) : _nSentinels(clusterMaxSize)
+{
+	assert(_nSentinels > 0);
+
+	// this needs to be in the local memory because it will be a dependency
+	_sentinels = (int *) ClusterMemoryManagement::lmalloc(_nSentinels * sizeof(int));
+}
+
+Serialize::~Serialize()
+{
+	assert(_nSentinels > 0);
+	assert(_sentinels != nullptr);
+
+	ClusterMemoryManagement::lfree((void *) _sentinels, _nSentinels);
+}
+
 
 void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t *)
 {
@@ -35,6 +54,20 @@ void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t 
 	assert(serializeArgs != nullptr);
 	assert(serializeArgs->_nodeIdx == ClusterManager::getCurrentClusterNode()->getCommIndex());
 
+	MPI_Comm intracom = MPI_COMM_NULL;
+
+	// We need to do this every time because communicator may change.
+	if (ClusterManager::clusterSize() == 1) {
+		assert(serializeArgs->_nodeIdx == 0);
+		intracom = MPI_COMM_SELF;
+	} else {
+		Messenger *msn = ClusterManager::getMessenger();
+		assert(msn != nullptr);
+		MPIMessenger *mpiMsn = dynamic_cast<MPIMessenger *>(msn);
+		assert(mpiMsn != nullptr);
+		intracom = mpiMsn->getCommunicator();
+	}
+
 	const bool isSerialize = serializeArgs->_isSerialize;
 	const size_t nRegions = serializeArgs->_numRegions;
 
@@ -43,8 +76,8 @@ void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t 
 	MPI_File fh;
 	const std::string filename = Serialize::getFilename(serializeArgs);
 
-	int rc = MPI_File_open(MPI_COMM_WORLD, filename.c_str(), mode, MPI_INFO_NULL, &fh);
-	MPIErrorHandler::handle(rc, MPI_COMM_WORLD, "from MPI_File_open");
+	int rc = MPI_File_open(intracom, filename.c_str(), mode, MPI_INFO_NULL, &fh);
+	MPIErrorHandler::handle(rc, intracom, "from MPI_File_open");
 
 	if (nRegions > 0) {
 		const char *start = (char *) serializeArgs->_fullRegion.getStartAddress();
@@ -63,17 +96,17 @@ void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t 
 
 			if (isSerialize) {
 				rc = MPI_File_write_at(fh, offset, start_i, size, MPI_BYTE, &statuses[i]);
-				MPIErrorHandler::handle(rc, MPI_COMM_WORLD, "from MPI_File_write_at");
+				MPIErrorHandler::handle(rc, intracom, "from MPI_File_write_at");
 			} else {
 				rc = MPI_File_read_at(fh, offset, start_i, size, MPI_BYTE, &statuses[i]);
-				MPIErrorHandler::handle(rc, MPI_COMM_WORLD, "from MPI_File_read_at");
+				MPIErrorHandler::handle(rc, intracom, "from MPI_File_read_at");
 			}
 		}
 		free(statuses);
 	}
 
 	rc = MPI_File_close(&fh);
-	MPIErrorHandler::handle(rc, MPI_COMM_WORLD, "from MPI_File_close");
+	MPIErrorHandler::handle(rc, intracom, "from MPI_File_close");
 }
 
 void Serialize::registerDependencies(void *arg, void *, void *)
@@ -119,7 +152,6 @@ void Serialize::getConstraints(void* arg, nanos6_task_constraints_t *const const
 	constraints->node = serializeArgs->_nodeIdx;
 	constraints->stream = 0;
 }
-
 
 nanos6_task_invocation_info_t Serialize::invocationInfo = { "(De)Serialization code." };
 
@@ -176,21 +208,7 @@ std::vector<Serialize::regionSet> Serialize::getHomeRegions(const DataAccessRegi
 int Serialize::serializeRegion(
 	const DataAccessRegion &region, size_t process, size_t id, bool serialize
 ) {
-	// Attempt to create the directory if it does not exist.
-	if (mkdir(std::to_string(process).c_str(), 0777) == 0) {
-		std::cerr << "Serialization directory created: " << std::to_string(process) << std::endl;
-	}
-
-	std::vector<regionSet> dependencies = Serialize::getHomeRegions(region);
-	assert(dependencies.size() == (size_t) ClusterManager::clusterSize());
-
-	// TaskWait::taskWait("(De)Serialization", false, true);
-	// TODO: Modify this for malleability.
-	// TODO: Solve the memory leak created here with initialize-finalize
-	if (Serialize::sentinel == nullptr) {
-		Serialize::sentinel
-			= (int *)ClusterMemoryManagement::lmalloc(ClusterManager::clusterSize() * sizeof(int));
-	}
+	assert(ClusterManager::isMasterNode());
 
 	WorkerThread *workerThread = WorkerThread::getCurrentWorkerThread();
 	assert(workerThread != nullptr);
@@ -198,11 +216,36 @@ int Serialize::serializeRegion(
 	Task *parent = workerThread->getTask();
 	assert(parent != nullptr);
 
+	FatalErrorHandler::failIf(!parent->isMainTask(),
+		"Serialization can only be called from main");
+
+	if (_singleton == nullptr) {
+		// This is a leak; the memory for _singleton->_sentinels is from lmalloc from inside the
+		// main task, so we don't have a "good" way to release it. Even when this may not be an
+		// issue... maybe you find a better way.
+		// At the moment the only way I can imagine is to call the tryFinalize function from the
+		// main_task_wrapper itself.. but that may be a bit too hacky?
+		_singleton = new Serialize(ClusterManager::clusterMaxSize());
+		assert(_singleton != nullptr);
+	}
+
+	// Attempt to create the directory if it does not exist.
+	if (mkdir(std::to_string(process).c_str(), 0777) == 0) {
+		std::cerr << "Serialization directory created: " << std::to_string(process) << std::endl;
+	}
+
+	std::vector<regionSet> dependencies = Serialize::getHomeRegions(region);
+	assert(dependencies.size() == (size_t) ClusterManager::clusterSize());
+	assert(dependencies.size() <= (size_t) ClusterManager::clusterMaxSize());
+
 	// Submit one task/node even when there is not any region because the MPIIO function is
 	// collective
 	for (size_t nodeIdx = 0; nodeIdx < dependencies.size(); ++nodeIdx) {
+		assert(nodeIdx < _singleton->_nSentinels);
+
 		const regionSet &taskRegions = dependencies[nodeIdx];
 		const size_t nRegions = taskRegions.size();
+		int *sentinel = &(_singleton->_sentinels[nodeIdx]);
 
 		Task *task = AddTask::createTask(
 			(nanos6_task_info_t*) &Serialize::infoVarSerialize,
@@ -219,7 +262,7 @@ int Serialize::serializeRegion(
 		assert(args != nullptr);
 
 		new (args) SerializeArgs(
-			task, region, nodeIdx, process, id, serialize, &Serialize::sentinel[nodeIdx], taskRegions
+			task, region, nodeIdx, process, id, serialize, sentinel, taskRegions
 		);
 
 		AddTask::submitTask(task, parent, false);
@@ -227,6 +270,3 @@ int Serialize::serializeRegion(
 
 	return 0;
 }
-
-
-
