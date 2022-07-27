@@ -47,7 +47,11 @@ private:
 	// this
 	SpinLock _abortLock;
 
+
 	int convertToBitMask(int mpi_ub_tag) const;
+
+	std::string spawnArgc;
+	char **spawnArgv;
 
 	int createTag(const Message::Deliverable *delv) const
 	{

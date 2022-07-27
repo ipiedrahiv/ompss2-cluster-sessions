@@ -204,13 +204,25 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 	ret = MPI_Comm_get_parent(&PARENT_COMM);
 	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
 
+	ConfigVariable<std::string> clusterSplitEnv("cluster.hybrid.split");
+	if (!clusterSplitEnv.isPresent()) {
+		// When there is not parent this is part of the initial communicator.
+		ret = MPI_Comm_dup(MPI_COMM_WORLD, &INTRA_COMM);
+		MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
+
+		char commname[MPI_MAX_OBJECT_NAME];
+		snprintf(commname, MPI_MAX_OBJECT_NAME - 1, "INTRA_WORLD_%s",
+			(PARENT_COMM != MPI_COMM_NULL ? "spawned" : "nospawned"));
+
+		ret = MPI_Comm_set_name(INTRA_COMM, commname);
+		MPIErrorHandler::handle(ret, INTRA_COMM);
+	}
 	// The first element in the vector is information about the current INTRA_COMM before any merge.
 	// WHen the process is not spawned then PARENT_COMM is MPI_COMM_NULL
 	commInfo info = {.intraComm = INTRA_COMM, .interComm = PARENT_COMM, .groupSize = groupSize};
 	_spawnedCommInfoStack.push(info);
 
 	//! Create a new communicator
-	ConfigVariable<std::string> clusterSplitEnv("cluster.hybrid.split");
 	if (PARENT_COMM == MPI_COMM_NULL) {
 
 		//! Calculate number of nodes and node number
@@ -235,23 +247,11 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 			}
 			_numInstancesThisNode = n;
 
-			for (int i=0; i<_numInstancesThisNode; i++) {
+			for (int i = 0; i < _numInstancesThisNode; ++i) {
 				bool isMasterInstance = (i==0) && (_physicalNodeNum==0); /* first instance on first node */
 				_isMasterThisNode.push_back(isMasterInstance);
 			}
 			_instrumentationRank = _externalRank;
-
-			// Create a new communicator
-			// When there is not parent this is part of the initial communicator.
-			ret = MPI_Comm_dup(MPI_COMM_WORLD, &INTRA_COMM);
-			MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
-
-			char commname[MPI_MAX_OBJECT_NAME];
-			snprintf(commname, MPI_MAX_OBJECT_NAME - 1, "INTRA_WORLD_%s",
-				(PARENT_COMM != MPI_COMM_NULL ? "spawned" : "nospawned"));
-
-			ret = MPI_Comm_set_name(INTRA_COMM, commname);
-			MPIErrorHandler::handle(ret, INTRA_COMM);
 		}
 	} else {
 		FatalErrorHandler::failIf(
@@ -298,6 +298,18 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 	ret = MPI_Comm_size(INTRA_COMM, &_wsize);
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 	assert(_wsize > 0);
+
+	// The parent class already has a copy of _argc and _argv, but as MPI spawn has extra
+	// requirements, we use our local and keep the others untouched in case we implement other
+	// messengers in the future
+	EnvironmentVariable<std::string> envWrapper("NANOS6_WRAPPER");
+	if (envWrapper.isPresent()) {
+		spawnArgc = envWrapper.getValue();
+		spawnArgv = argv;
+	} else {
+		spawnArgc = argv[0];
+		spawnArgv = &argv[1];
+	}
 }
 
 
@@ -777,7 +789,10 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 	int ret = MPI_Comm_size(INTRA_COMM, &tmp);
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 
-	ret = MPI_Comm_spawn(_argv[0], &_argv[1], delta, info, 0, INTRA_COMM, &newinter, &errcode);
+	ret = MPI_Comm_spawn(
+		spawnArgc.c_str(), spawnArgv, delta, info, 0, INTRA_COMM, &newinter, &errcode
+	);
+
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 	FatalErrorHandler::failIf(errcode != MPI_SUCCESS, "New process returned error code: ", errcode);
 
