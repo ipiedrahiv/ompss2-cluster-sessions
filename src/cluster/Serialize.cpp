@@ -25,7 +25,8 @@
 #include "src/cluster/messenger/mpi/MPIErrorHandler.hpp"
 
 #include <sys/stat.h> // for mkdir
-
+#include <dirent.h>   // opendir
+#include <errno.h>    // error 
 
 Serialize *Serialize::_singleton = nullptr;
 
@@ -104,7 +105,7 @@ void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t 
 		for (size_t i = 0; i < serializeArgs->_numRegions; ++i) {
 			// This asserts also that offset will be non-negative.
 			assert(serializeArgs->_regionsDeps[i].fullyContainedIn(serializeArgs->_fullRegion));
-			assert(serializeArgs->_regionsDeps[i].getSize() < std::numeric_limits<int>::max());
+			assert(serializeArgs->_regionsDeps[i].getSize() <= std::numeric_limits<int>::max());
 
 			void * const start_i = serializeArgs->_regionsDeps[i].getStartAddress();
 			const int size = serializeArgs->_regionsDeps[i].getSize();
@@ -248,8 +249,7 @@ int Serialize::serializeRegion(
 	Task *parent = workerThread->getTask();
 	assert(parent != nullptr);
 
-	FatalErrorHandler::failIf(!parent->isMainTask(),
-		"Serialization can only be called from main");
+	FatalErrorHandler::failIf(!parent->isMainTask(), "Serialization can only be called from main");
 
 	if (_singleton == nullptr) {
 		// This is a leak; the memory for _singleton->_sentinels is from lmalloc from inside the
@@ -261,16 +261,39 @@ int Serialize::serializeRegion(
 		assert(_singleton != nullptr);
 	}
 
-	// Attempt to create the directory if it does not exist.
-	if (mkdir(std::to_string(process).c_str(), 0777) == 0) {
-		std::cerr << "Serialization directory created: " << std::to_string(process) << std::endl;
+	// Check or create the serialization directory.
+	const std::string dirname = std::to_string(process);
+
+	DIR* dir = opendir(dirname.c_str());
+	if (dir) {                                   // Directory exists, so do nothing,
+		closedir(dir);
+	} else if (ENOENT == errno) {                // Directory doesn't exist
+		if (serialize) {                         // When serializing we can try to create it.
+			const int ret = mkdir(dirname.c_str(), 0777);
+			if (ret == 0) {
+				FatalErrorHandler::warn("Serialization directory created: ", dirname);
+			} else {
+				FatalErrorHandler::warn("Couldn't create serialization dir: ", dirname);
+				return -1;
+			}
+		} else {            // When deserializing we shouldn't create it, just warn and return error
+			FatalErrorHandler::warn(
+				"Deserialization directory: ", dirname, " doesn't exist. We can't recover from it.");
+			return -1;
+		}
+	} else {                                     // On unknown error fail in either case
+		FatalErrorHandler::warn(
+			"Opendir failed to open serialization directory:", dirname, "Error: ", strerror(errno)
+		);
+		return -1;
 	}
 
+	// Get the dependencies vector.
 	std::vector<regionSet> dependencies = Serialize::getHomeRegions(region);
 	assert(dependencies.size() == (size_t) ClusterManager::clusterSize());
 	assert(dependencies.size() <= (size_t) ClusterManager::clusterMaxSize());
 
-	// Submit one task/node even when there is not any region because the MPIIO function is
+	// Submit one task/node even when there is not any region because the MPI_File_open function is
 	// collective
 	for (size_t nodeIdx = 0; nodeIdx < dependencies.size(); ++nodeIdx) {
 		assert(nodeIdx < _singleton->_nSentinels);

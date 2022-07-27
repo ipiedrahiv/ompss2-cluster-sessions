@@ -195,7 +195,6 @@ void ClusterManager::initialize(int argc, char **argv)
 
 #if HAVE_SLURM
 		char hostname[HOST_NAME_MAX];
-		gethostname(hostname, HOST_NAME_MAX);
 		FatalErrorHandler::failIf(
 			gethostname(hostname, HOST_NAME_MAX) != 0, "Couldn't get hostname."
 		);
