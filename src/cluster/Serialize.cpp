@@ -77,6 +77,8 @@ void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t 
 	MPI_File fh;
 	const std::string filename = Serialize::getFilename(serializeArgs);
 
+	ClusterManager::synchronizeAll();
+
 	int rc = MPI_File_open(intracom, filename.c_str(), mode, MPI_INFO_NULL, &fh);
 	MPIErrorHandler::handle(rc, intracom, "from MPI_File_open");
 
@@ -123,6 +125,7 @@ void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t 
 		free(statuses);
 	}
 
+	ClusterManager::synchronizeAll();
 	rc = MPI_File_close(&fh);
 	MPIErrorHandler::handle(rc, intracom, "from MPI_File_close");
 }

@@ -448,38 +448,32 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 		// performing everything with a minimal number of messages.
 		const MessageSpawnHostInfo &info = entries[ent];
 
-		const std::string hostname(info.hostname);
-
 		assert(ClusterManager::clusterSize() == oldSize + spawned);
 
+		if (ent > 0) {
+			// This to match with new processes just coming and stopping polling services
+			ClusterManager::synchronizeAll();
+		}
+
+		newSize = _singleton->_msn->messengerSpawn(info.nprocs, info.hostname);
+
 		for (size_t step = 0; step < info.nprocs; ++step) {
-
-			if (spawned > 0) {
-				// This to match with new processes just coming and stopping polling services
-				ClusterManager::synchronizeAll();
-			}
-
-			newSize = _singleton->_msn->messengerSpawn(1, hostname);
 
 			const int newindex = oldSize + spawned;
 
 			// Register the new nodes and their memory
 			ClusterNode *node = new ClusterNode(newindex, newindex, 0, false, newindex);
-			node->setHostName(hostname);
-
 			assert(node != nullptr);
+			node->setHostName(info.hostname);
 
 			_singleton->_clusterNodes.push_back(node);
 			VirtualMemoryManagement::registerNodeLocalRegion(node);
-			assert(ClusterManager::clusterSize() == newSize);
-			++spawned;
 
 			if (ClusterManager::isMasterNode()) {
 				// TODO: All these messages are blocking; we may improve this code to make it
 				// async. The easiest way may be to modify the messages to have a reference counter
 				// and ClusterPollingServices::PendingQueue<Message>::addPending to search in the
-				// pending queue for this message.
-				// We could also make the setMessengerData to have a list
+				// pending queue for this message. We could also make the setMessengerData to have a list
 				DataAccessRegion init_region((void *)&_singleton->_dataInit, sizeof(DataInitSpawn));
 				assert(node->getMemoryNode() != nullptr);
 
@@ -488,29 +482,84 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 					init_region, node->getMemoryNode(), std::numeric_limits<int>::max(), true
 				);
 
-				// Then master sends the init message to the new processes. We need to send a
-				// separate message to inform the new processes that the spawn is not finished
-				// because the ClusterManager::sendDataRaw and its counter part expect a fixed size
-				// message and the polling services on the new nodes are not running yet either.
-				std::vector<MessageSpawnHostInfo> spawns(&entries[ent], &entries[ent] + (nEntries - ent));
-				assert(spawns[0].nprocs > 0);
+				const int pending = delta - (spawned - step + info.nprocs);
 
-				// discount the already spawned processes in this host (step + this one)
-				spawns[0].nprocs -= (step + 1);
+				if (nEntries - ent > 1) {
+					std::vector<MessageSpawnHostInfo> spawns(&entries[ent+1], &entries[ent+1] + (nEntries - ent - 1));
+					assert(spawns.size() > 0);
+					assert(pending > 0);
 
-				if (spawns[0].nprocs == 0) {
-					spawns.erase(spawns.begin());
-				}
-
-				if (spawns.size() > 0) {
-					assert(delta - spawned > 0);
-					MessageSpawn msgSpawn_i(delta - spawned, spawns);
+					MessageSpawn msgSpawn_i(pending, spawns);
 					ClusterManager::sendMessage(&msgSpawn_i, node, true);
 				}
 
-				SlurmAPI::deltaProcessToHostname(hostname, 1);
 			}
+			++spawned;
 		}
+		assert(ClusterManager::clusterSize() == newSize);
+		if (SlurmAPI::isEnabled()) {
+			SlurmAPI::deltaProcessToHostname(info.hostname, info.nprocs);
+		}
+
+		// for (size_t step = 0; step < info.nprocs; ++step) {
+
+		// 	if (spawned > 0) {
+		// 		// This to match with new processes just coming and stopping polling services
+		// 		ClusterManager::synchronizeAll();
+		// 	}
+
+		// 	newSize = _singleton->_msn->messengerSpawn(1, hostname);
+
+		// 	const int newindex = oldSize + spawned;
+
+		// 	// Register the new nodes and their memory
+		// 	ClusterNode *node = new ClusterNode(newindex, newindex);
+		// 	node->setHostName(hostname);
+
+		// 	assert(node != nullptr);
+
+		// 	_singleton->_clusterNodes.push_back(node);
+		// 	VirtualMemoryManagement::registerNodeLocalRegion(node);
+		// 	assert(ClusterManager::clusterSize() == newSize);
+		// 	++spawned;
+
+		// 	if (ClusterManager::isMasterNode()) {
+		// 		// TODO: All these messages are blocking; we may improve this code to make it
+		// 		// async. The easiest way may be to modify the messages to have a reference counter
+		// 		// and ClusterPollingServices::PendingQueue<Message>::addPending to search in the
+		// 		// pending queue for this message.
+		// 		// We could also make the setMessengerData to have a list
+		// 		DataAccessRegion init_region((void *)&_singleton->_dataInit, sizeof(DataInitSpawn));
+		// 		assert(node->getMemoryNode() != nullptr);
+
+		// 		// Send init message
+		// 		ClusterManager::sendDataRaw(
+		// 			init_region, node->getMemoryNode(), std::numeric_limits<int>::max(), true
+		// 		);
+
+		// 		// Then master sends the init message to the new processes. We need to send a
+		// 		// separate message to inform the new processes that the spawn is not finished
+		// 		// because the ClusterManager::sendDataRaw and its counter part expect a fixed size
+		// 		// message and the polling services on the new nodes are not running yet either.
+		// 		std::vector<MessageSpawnHostInfo> spawns(&entries[ent], &entries[ent] + (nEntries - ent));
+		// 		assert(spawns[0].nprocs > 0);
+
+		// 		// discount the already spawned processes in this host (step + this one)
+		// 		spawns[0].nprocs -= (step + 1);
+
+		// 		if (spawns[0].nprocs == 0) {
+		// 			spawns.erase(spawns.begin());
+		// 		}
+
+		// 		if (spawns.size() > 0) {
+		// 			assert(delta - spawned > 0);
+		// 			MessageSpawn msgSpawn_i(delta - spawned, spawns);
+		// 			ClusterManager::sendMessage(&msgSpawn_i, node, true);
+		// 		}
+
+		// 		SlurmAPI::deltaProcessToHostname(hostname, 1);
+		// 	}
+		// }
 	}
 
 	const int newIndex = _singleton->_msn->getNodeIndex();

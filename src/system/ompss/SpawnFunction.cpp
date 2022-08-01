@@ -148,11 +148,9 @@ void SpawnFunction::spawnFunction(
 		_pendingSpawnedFunctions++;
 	}
 
-#if defined(EXTRAE_ENABLED) || ! defined(NDEBUG)
 	if (label != nullptr && strcmp(label, "main") == 0) {
 		task->markAsMainTask();
 	}
-#endif
 
 	// Submit the task without parent
 	AddTask::submitTask(task, nullptr);
