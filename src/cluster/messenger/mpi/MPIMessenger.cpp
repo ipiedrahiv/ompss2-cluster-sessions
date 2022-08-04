@@ -779,9 +779,11 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 	MPI_Comm newinter = MPI_COMM_NULL;               // Temporal intercomm
 	MPI_Comm newintra = MPI_COMM_NULL;               // Temporal intracomm
 
-	MPI_Info info;
-	MPI_Info_create(&info);
-	MPI_Info_set(info, "host", hostname.c_str());
+	MPI_Info info = MPI_INFO_NULL;
+	if (!hostname.empty()) {
+		MPI_Info_create(&info);
+		MPI_Info_set(info, "host", hostname.c_str());
+	}
 
 	int errcode = 0;
 
@@ -804,8 +806,10 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 
 	INTRA_COMM = newintra;
 
-	ret = MPI_Info_free(&info);
-	MPIErrorHandler::handle(ret, INTRA_COMM);
+	if (info != MPI_INFO_NULL) {
+		ret = MPI_Info_free(&info);
+		MPIErrorHandler::handle(ret, INTRA_COMM);
+	}
 
 	__attribute__((unused)) const int oldsize = _wsize;
 	messengerReinitialize(false);
