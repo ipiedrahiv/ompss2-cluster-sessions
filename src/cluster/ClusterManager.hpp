@@ -92,6 +92,15 @@ private:
 
 	~ClusterManager();
 
+
+	// Spawn all processes at once; rely on slurm srun policy.. Use this policy only for profiling
+	// purposes.
+	int resizeFull(int delta, size_t nEntries, const MessageSpawnHostInfo *entries);
+	int resizeByPolicy(
+		nanos6_spawn_policy_t policy,
+		int delta, size_t nEntries, const MessageSpawnHostInfo *entries
+	);
+
 public:
 	//! \brief Spawn new processes.
 	//!
@@ -633,7 +642,7 @@ public:
 		return _singleton->_totalReadyTasks;
 	}
 
-	static int nanos6Resize(int delta);
+	static int nanos6Resize(int delta, nanos6_spawn_policy_t policy = nanos6_spawn_by_one);
 
 };
 

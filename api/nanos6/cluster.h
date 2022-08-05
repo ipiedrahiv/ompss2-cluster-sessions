@@ -43,6 +43,13 @@ typedef enum {
 	nanos6_wait
 } nanos6_early_release_t;
 
+typedef enum {
+	nanos6_spawn_by_group = 0,  // complete group relying on srun
+	nanos6_spawn_by_host,       // Spawn by step size process per host (recommended)
+	nanos6_spawn_by_one         // Spawn with granularity one
+} nanos6_spawn_policy_t;
+
+
 //! Like nanos6_library_mode_init but requires argc and argv. It is intended to be used in cluster
 //! mode only
 __attribute__ ((used)) char const * nanos6_library_mode_init_cluster(int argc, char **argv);

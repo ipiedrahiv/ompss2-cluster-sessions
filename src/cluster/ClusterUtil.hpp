@@ -120,5 +120,20 @@ inline std::string clusterBacktrace()
 	return trace_buf.str();
 }
 
+inline struct timespec clusterDiffTime(const struct timespec *t1, const struct timespec *t2)
+{
+	assert(t2->tv_sec >= t1->tv_sec);
+	struct timespec ret;
+
+	if (t2->tv_nsec < t1->tv_nsec) {
+		ret.tv_nsec = 1000000000L + t2->tv_nsec - t1->tv_nsec;
+		ret.tv_sec = (t2->tv_sec - 1 - t1->tv_sec);
+	} else {
+		ret.tv_nsec = (t2->tv_nsec - t1->tv_nsec);
+		ret.tv_sec = (t2->tv_sec - t1->tv_sec);
+	}
+	return ret;
+}
+
 
 #endif /* CLUSTERUTIL_H */

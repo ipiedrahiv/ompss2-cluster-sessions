@@ -9,6 +9,7 @@
 
 #include <unistd.h>
 #include <Message.hpp>
+#include <api/nanos6/cluster.h>
 
 struct MessageSpawnHostInfo {
 	static constexpr MessageType messageType = SPAWN;
@@ -51,6 +52,7 @@ class MessageResize : public Message {
 
 	struct ResizeMessageContent {
 		//! address of the distributed allocation
+		nanos6_spawn_policy_t _policy;
 		int _deltaNodes;   // >0 spawn || <0 shrink: but always !=0
 		size_t _nEntries;
 		T _listEntries[];
@@ -59,20 +61,21 @@ class MessageResize : public Message {
 	ResizeMessageContent *_content;
 
 public:
-	MessageResize(int deltaNodes, size_t nEntries, const T *infoList)
+	MessageResize(nanos6_spawn_policy_t policy, int deltaNodes, size_t nEntries, const T *infoList)
 		: Message(T::messageType, sizeof(ResizeMessageContent) + nEntries * sizeof(T)),
 		  _content(reinterpret_cast<ResizeMessageContent *>(_deliverable->payload))
 	{
 		assert(_content != nullptr);
 		assert(deltaNodes != 0);
 
+		_content->_policy = policy;
 		_content->_deltaNodes = deltaNodes;
 		_content->_nEntries = nEntries;
 		memcpy(_content->_listEntries, infoList, nEntries * sizeof(T));
 	}
 
-	MessageResize(int deltaNodes, const std::vector<T> infoList)
-		: MessageResize(deltaNodes, infoList.size(), infoList.data())
+	MessageResize(nanos6_spawn_policy_t policy, int deltaNodes, const std::vector<T> infoList)
+		: MessageResize(policy, deltaNodes, infoList.size(), infoList.data())
 	{
 	}
 
@@ -103,6 +106,11 @@ public:
 		std::stringstream ss;
 		ss << "[" << this->getName() << ": " << _content->_deltaNodes << "]";
 		return ss.str();
+	}
+
+	nanos6_spawn_policy_t getPolicy() const
+	{
+		return _content->_policy;
 	}
 
 	bool handleMessage() override;
