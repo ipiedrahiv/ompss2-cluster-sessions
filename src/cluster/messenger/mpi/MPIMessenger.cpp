@@ -779,22 +779,21 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 	MPI_Comm newinter = MPI_COMM_NULL;               // Temporal intercomm
 	MPI_Comm newintra = MPI_COMM_NULL;               // Temporal intracomm
 
+	int ret = 0;
+
 	MPI_Info info = MPI_INFO_NULL;
 	if (!hostname.empty()) {
-		MPI_Info_create(&info);
-		MPI_Info_set(info, "host", hostname.c_str());
+		ret = MPI_Info_create(&info);
+		MPIErrorHandler::handle(ret, INTRA_COMM);
+
+		ret = MPI_Info_set(info, "host", hostname.c_str());
+		MPIErrorHandler::handle(ret, INTRA_COMM);
 	}
 
 	int errcode = 0;
-
-	int tmp = -1;
-	int ret = MPI_Comm_size(INTRA_COMM, &tmp);
-	MPIErrorHandler::handle(ret, INTRA_COMM);
-
 	ret = MPI_Comm_spawn(
 		spawnArgc.c_str(), spawnArgv, delta, info, 0, INTRA_COMM, &newinter, &errcode
 	);
-
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 	FatalErrorHandler::failIf(errcode != MPI_SUCCESS, "New process returned error code: ", errcode);
 
@@ -806,10 +805,13 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 
 	INTRA_COMM = newintra;
 
-	if (info != MPI_INFO_NULL) {
-		ret = MPI_Info_free(&info);
-		MPIErrorHandler::handle(ret, INTRA_COMM);
-	}
+	// This is commented to go around the Intel issue with MPI_Comm_spawn; it seems like intel frees
+	// the info internal content in the MPI_Comm_spawn; somehow the info cannot be used after the
+	// spawn either to access or to release.
+	// if (info != MPI_INFO_NULL) {
+	// 	ret = MPI_Info_free(&info);
+	// 	MPIErrorHandler::handle(ret, INTRA_COMM);
+	// }
 
 	__attribute__((unused)) const int oldsize = _wsize;
 	messengerReinitialize(false);

@@ -18,6 +18,7 @@ struct MessageSpawnHostInfo {
 
 	MessageSpawnHostInfo(std::string name, size_t procs) :nprocs(procs)
 	{
+		assert(!name.empty());
 		strncpy(hostname, name.c_str(), HOST_NAME_MAX);
 	}
 
