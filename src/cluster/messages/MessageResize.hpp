@@ -81,7 +81,7 @@ public:
 		memcpy(_content->_listEntries, infoList, nEntries * sizeof(T));
 	}
 
-	MessageResize(nanos6_spawn_policy_t policy, int deltaNodes, const std::vector<T> infoList)
+	MessageResize(nanos6_spawn_policy_t policy, int deltaNodes, const std::vector<T> &infoList)
 		: MessageResize(policy, deltaNodes, infoList.size(), infoList.data())
 	{
 	}

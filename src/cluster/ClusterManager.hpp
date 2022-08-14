@@ -653,7 +653,7 @@ public:
 		return _singleton->_totalReadyTasks;
 	}
 
-	static int nanos6Resize(int delta, nanos6_spawn_policy_t policy = nanos6_spawn_by_one);
+	static int nanos6Resize(int delta, nanos6_spawn_policy_t policy = nanos6_spawn_by_host);
 
 };
 
