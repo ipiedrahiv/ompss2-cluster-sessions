@@ -335,6 +335,17 @@ __require_CLUSTER
 	# variable is zero malleability is disabled
 	num_max_nodes = 0
 
+	# Possible values for spawn policies are:
+	# group: Spawn all at once
+	# host: Spawn by host groups (like single when 1 ppn)
+	# single: Spawn processes individually (time consuming)
+	default_spawn_policy = "host"
+
+	# Possible values for the transfer policy are:
+	# lazy: Transfer data selectively form exiting ranks
+	# eager: Transfer everything to it's home node.
+	default_shrink_transfer_policy = "lazy"
+
 	[cluster.auto]
 		# Optimize non-accessed parts of auto accesses
 		optimize_nonaccessed = true

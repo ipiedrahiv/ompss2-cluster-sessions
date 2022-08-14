@@ -48,12 +48,12 @@ struct MessageShrinkDataInfo {
 	}
 };
 
-template <typename T>
+template <typename policy_t, typename T>
 class MessageResize : public Message {
 
 	struct ResizeMessageContent {
 		//! address of the distributed allocation
-		nanos6_spawn_policy_t _policy;
+		policy_t _policy;
 		int _deltaNodes;   // >0 spawn || <0 shrink: but always !=0
 		size_t _nEntries;
 		T _listEntries[];
@@ -62,7 +62,7 @@ class MessageResize : public Message {
 	ResizeMessageContent *_content;
 
 public:
-	MessageResize(nanos6_spawn_policy_t policy, int deltaNodes, size_t nEntries, const T *infoList)
+	MessageResize(policy_t policy, int deltaNodes, size_t nEntries, const T *infoList)
 		: Message(T::messageType, sizeof(ResizeMessageContent) + nEntries * sizeof(T)),
 		  _content(reinterpret_cast<ResizeMessageContent *>(_deliverable->payload))
 	{
@@ -81,7 +81,7 @@ public:
 		memcpy(_content->_listEntries, infoList, nEntries * sizeof(T));
 	}
 
-	MessageResize(nanos6_spawn_policy_t policy, int deltaNodes, const std::vector<T> &infoList)
+	MessageResize(policy_t policy, int deltaNodes, const std::vector<T> &infoList)
 		: MessageResize(policy, deltaNodes, infoList.size(), infoList.data())
 	{
 	}
@@ -124,8 +124,8 @@ public:
 	bool handleMessageNamespace() override;
 };
 
-typedef MessageResize<MessageSpawnHostInfo> MessageSpawn;
-typedef MessageResize<MessageShrinkDataInfo> MessageShrink;
+typedef MessageResize<nanos6_spawn_policy_t, MessageSpawnHostInfo> MessageSpawn;
+typedef MessageResize<nanos6_shrink_transfer_policy_t, MessageShrinkDataInfo> MessageShrink;
 
 static const bool __attribute__((unused))_registered_spawn =
 	Message::RegisterMSGClass<MessageSpawn>(SPAWN);

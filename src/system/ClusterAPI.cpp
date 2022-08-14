@@ -108,7 +108,12 @@ extern "C" {
 
 	int nanos6_cluster_resize(int delta)
 	{
-		return ClusterManager::nanos6Resize(delta);
+		return ClusterManager::nanos6Resize(delta, nanos6_spawn_default);
+	}
+
+	int nanos6_cluster_resize_with_policy(int delta, nanos6_spawn_policy_t policy)
+	{
+		return ClusterManager::nanos6Resize(delta, policy);
 	}
 
 

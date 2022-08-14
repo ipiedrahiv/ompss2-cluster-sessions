@@ -13,15 +13,15 @@
 #include <ClusterManager.hpp>
 #include <NodeNamespace.hpp>
 
-template<typename T>
-bool MessageResize<T>::handleMessage()
+template<typename policy, typename T>
+bool MessageResize<policy,T>::handleMessage()
 {
 	NodeNamespace::setActionMessage(this);
 	return false;
 }
 
-template<typename T>
-bool MessageResize<T>::handleMessageNamespace()
+template<typename policy, typename T>
+bool MessageResize<policy,T>::handleMessageNamespace()
 {
 	ClusterManager::handleResizeMessage(this);
 	return true;

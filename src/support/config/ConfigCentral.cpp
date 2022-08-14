@@ -29,6 +29,9 @@ ConfigCentral::ConfigCentral() :
 	registerOption<integer_t>("cluster.num_message_handler_workers", 2);
 	registerOption<integer_t>("cluster.num_max_nodes", 0);
 
+	registerOption<string_t>("cluster.default_spawn_policy", "host");
+	registerOption<string_t>("cluster.default_shrink_transfer_policy", "lazy");
+
 	registerOption<bool_t>("cluster.mpi.comm_data_raw", true);
 
 	registerOption<size_t>("cluster.message_max_size", std::numeric_limits<int>::max());

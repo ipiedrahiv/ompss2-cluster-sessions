@@ -49,17 +49,17 @@ static std::vector<MessageShrinkDataInfo> getEagerlyTransfers(
 			DataAccess *dataAccess = &(*position);
 			assert(dataAccess != nullptr);
 
-			const ClusterMemoryNode *oldClusterLocation = nullptr;
-			const MemoryPlace *newLocation = nullptr;
-
 			const MemoryPlace *accessLocation = dataAccess->getLocation();
 			assert(accessLocation != nullptr);
 
 			const DataAccessRegion &region = dataAccess->getAccessRegion();
 			assert(!region.empty());
 
+			const WriteID oldWriteId = dataAccess->getWriteID();
+			const int oldwriteIDNode = WriteIDManager::getWriteIDNode(oldWriteId);
 			const nanos6_device_t accessDeviceType = accessLocation->getType();
 
+			const ClusterMemoryNode *oldClusterLocation = nullptr;
 			if (accessDeviceType == nanos6_cluster_device) {
 				// By default we don't migrate the accesses
 				oldClusterLocation = dynamic_cast<const ClusterMemoryNode*>(accessLocation);
@@ -67,8 +67,9 @@ static std::vector<MessageShrinkDataInfo> getEagerlyTransfers(
 				if (VirtualMemoryManagement::isDistributedRegion(region)) {
 					oldClusterLocation = thisClusterLocation;
 				} else {
-					// We don't touch local accesses because they must be already here
-					return false;  // Continue and no erase
+					// We don't touch local accesses because they must be already here, so return
+					// false to continue
+					return false;
 				}
 			} else {
 				FatalErrorHandler::fail(
@@ -79,9 +80,6 @@ static std::vector<MessageShrinkDataInfo> getEagerlyTransfers(
 			assert(oldClusterLocation != nullptr);
 
 			const Directory::HomeNodesArray *homeNodes = Directory::find(region);
-
-			const WriteID oldWriteId = dataAccess->getWriteID();
-			const int writeIDNode = WriteIDManager::getWriteIDNode(oldWriteId);
 
 			// The current policy to move all data back to its home node.
 			const bool needsUpdate = std::any_of(
@@ -136,7 +134,7 @@ static std::vector<MessageShrinkDataInfo> getEagerlyTransfers(
 						shrinkDataInfo.push_back(shrinkInfo);
 					}
 
-					if (writeIDNode >= expectedSize) {
+					if (oldwriteIDNode >= expectedSize) {
 						newDataAccess->setNewWriteID();
 					}
 
@@ -147,7 +145,7 @@ static std::vector<MessageShrinkDataInfo> getEagerlyTransfers(
 			}
 			delete homeNodes;
 
-			return needsUpdate; // nor erase the access
+			return needsUpdate; // If updated, remove the access, we will add the fragments latter
 		});
 
 	for (DataAccess *access: toRegisterLater) {
@@ -346,6 +344,11 @@ int ClusterManager::nanos6Resize(int delta, nanos6_spawn_policy_t policy)
 			);
 		}
 
+		// Set the default policy
+		if (policy == nanos6_spawn_default) {
+			policy = _singleton->_dataInit.defaultSpawnPolicy;
+		}
+
 		// TODO: Any spawn policy to implement may be done here in the hostInfos.
 		std::vector<MessageSpawnHostInfo> hostInfos = SlurmAPI::getSpawnHostInfoVector(delta);
 		if (hostInfos.empty()){
@@ -390,11 +393,21 @@ int ClusterManager::nanos6Resize(int delta, nanos6_spawn_policy_t policy)
 
 		TaskDataAccesses &accessStructures = currentTask->getDataAccesses();
 
-		// Here we must construct the accesses
-		const std::vector<MessageShrinkDataInfo> shrinkDataInfo
-			= getEagerlyTransfers(accessStructures, expectedSize);
+		// TODO: shrink always ignores the external policy, because they have different types may be
+		// confusing.
+		const nanos6_shrink_transfer_policy_t transferPolicy
+			= _singleton->_dataInit.defaultShrinkTransferPolicy;
 
-		MessageShrink msgShrink(policy, delta, shrinkDataInfo);
+		std::vector<MessageShrinkDataInfo> shrinkDataInfo;
+		if (transferPolicy == nanos6_spawn_lazy) {
+			shrinkDataInfo = getEagerlyTransfers(accessStructures, expectedSize);
+		} else if (transferPolicy == nanos6_spawn_eager) {
+			shrinkDataInfo = getLazyTransfers(accessStructures, expectedSize);
+		} else {
+			FatalErrorHandler::fail("defaultShrinkTransferPolicy has unmanaged value.");
+		}
+
+		MessageShrink msgShrink(transferPolicy, delta, shrinkDataInfo);
 
 		ClusterManager::sendMessageToAll(&msgShrink, true);
 
@@ -583,7 +596,7 @@ int ClusterManager::resizeByPolicy(
 	return delta;
 }
 
-int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo> *msgSpawn)
+int ClusterManager::handleResizeMessage(const MessageSpawn *msgSpawn)
 {
 	assert(_singleton != nullptr);
 	assert(_singleton->_msn != nullptr);
@@ -647,7 +660,7 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageSpawnHostInfo
 
 
 // SHRINK
-int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInfo> *msgShrink)
+int ClusterManager::handleResizeMessage(const MessageShrink *msgShrink)
 {
 	assert(_singleton != nullptr);
 	assert(_singleton->_msn != nullptr);

@@ -272,6 +272,19 @@ int nanos6_cluster_resize(int delta)
 	return (*symbol)(delta);
 }
 
+int nanos6_cluster_resize_with_policy(int delta, nanos6_spawn_policy_t policy)
+{
+	typedef int nanos6_cluster_resize_with_policy_t(int, nanos6_spawn_policy_t);
+
+	static nanos6_cluster_resize_with_policy_t *symbol = NULL;
+	if (__builtin_expect(symbol == NULL, 0)) {
+		symbol = (nanos6_cluster_resize_with_policy_t *) _nanos6_resolve_symbol(
+			"nanos6_cluster_resize_with_policy", "cluster", NULL);
+	}
+
+	return (*symbol)(delta, policy);
+}
+
 int nanos6_serialize(void *start, size_t nbytes, size_t process, size_t id, int checkpoint)
 {
 	typedef int nanos6_serialize_t(void *, size_t, size_t, size_t, int);

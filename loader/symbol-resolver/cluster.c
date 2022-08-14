@@ -23,5 +23,6 @@ RESOLVE_API_FUNCTION(nanos6_lfree, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_set_early_release, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_get_app_communicator, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_cluster_resize, "cluster", NULL);
+RESOLVE_API_FUNCTION(nanos6_cluster_resize_with_policy, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_serialize, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_fail, "cluster", NULL);

@@ -15,7 +15,7 @@
 
 // NOTE: The full version depends also on nanos6_major_api
 //       That is:   nanos6_major_api . nanos6_cluster_device_api
-enum nanos6_cluster_api_t { nanos6_cluster_api = 3 };
+enum nanos6_cluster_api_t { nanos6_cluster_api = 4 };
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,7 +44,8 @@ typedef enum {
 } nanos6_early_release_t;
 
 typedef enum {
-	nanos6_spawn_by_group = 0,  // complete group relying on srun
+	nanos6_spawn_default = 0,   // use the value configured as default
+	nanos6_spawn_by_group,      // complete group relying on srun
 	nanos6_spawn_by_host,       // Spawn by step size process per host (recommended)
 	nanos6_spawn_by_one         // Spawn with granularity one
 } nanos6_spawn_policy_t;
@@ -151,6 +152,8 @@ int nanos6_get_app_communicator(void *);
 //! \param[in] delta Number of nodes to add (>0) or remove (<0) from the world.
 //! \returns Same value than delta on success.
 int nanos6_cluster_resize(int delta);
+
+int nanos6_cluster_resize_with_policy(int delta, nanos6_spawn_policy_t policy);
 
 //! \brief Create or recover checkpoint info
 //!

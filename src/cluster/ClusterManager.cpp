@@ -204,6 +204,37 @@ void ClusterManager::initialize(int argc, char **argv)
 			// info from the slurm api. We can use this information at some point to deduce the
 			// distribution polity
 			if (_singleton->_dataInit.clusterMalleabilityEnabled()) {
+
+				// Set the spawn default policy used with simpler api.
+				ConfigVariable<std::string> defaultSpawnPolicy("cluster.default_spawn_policy");
+				std::string policyValue = defaultSpawnPolicy.getValue();
+				if (policyValue == "group") {
+					_singleton->_dataInit.defaultSpawnPolicy = nanos6_spawn_by_group;
+				} else if (policyValue == "host") {
+					_singleton->_dataInit.defaultSpawnPolicy = nanos6_spawn_by_host;
+				} else if (policyValue == "single") {
+					_singleton->_dataInit.defaultSpawnPolicy = nanos6_spawn_by_one;
+				} else {
+					FatalErrorHandler::warn(
+						"cluster.default_spawn_policy value:", policyValue, " is unknown, using: host"
+					);
+					_singleton->_dataInit.defaultSpawnPolicy = nanos6_spawn_by_host;
+				}
+
+				// Set the shrink data transfer policy.
+				ConfigVariable<std::string> defaultShrinkTransferPolicy("cluster.default_shrink_transfer_policy");
+				policyValue = defaultShrinkTransferPolicy.getValue();
+				if (policyValue == "lazy") {
+					_singleton->_dataInit.defaultShrinkTransferPolicy = nanos6_spawn_lazy;
+				} else if (policyValue == "eager") {
+					_singleton->_dataInit.defaultShrinkTransferPolicy = nanos6_spawn_eager;
+				} else {
+					FatalErrorHandler::warn(
+						"cluster.default_shrink_transfer_policy value:", policyValue, " is unknown, using: lazy"
+					);
+					_singleton->_dataInit.defaultShrinkTransferPolicy = nanos6_spawn_lazy;
+				}
+
 				// TODO: if sometime we implement a collective operation, this may be implemented
 				// with a gather
 				ClusterNode *currentNode = ClusterManager::getCurrentClusterNode();

@@ -37,6 +37,9 @@ public:
 		DataAccessRegion _virtualDistributedRegion;
 		size_t _localSizePerNode = 0, _numMinNodes = 0, _numMaxNodes = 0;
 
+		nanos6_spawn_policy_t defaultSpawnPolicy = nanos6_spawn_by_host;
+		nanos6_shrink_transfer_policy_t defaultShrinkTransferPolicy = nanos6_spawn_lazy;
+
 		inline bool clusterMalleabilityEnabled() const
 		{
 			assert(_numMinNodes != 0);
@@ -653,7 +656,8 @@ public:
 		return _singleton->_totalReadyTasks;
 	}
 
-	static int nanos6Resize(int delta, nanos6_spawn_policy_t policy = nanos6_spawn_by_host);
+	static int nanos6Resize(int delta, nanos6_spawn_policy_t policy);
+
 
 };
 
