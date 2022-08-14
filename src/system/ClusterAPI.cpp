@@ -147,4 +147,9 @@ extern "C" {
 		}
 	}
 
+	int nanos6_get_cluster_info(struct cluster_info_t *info)
+	{
+		return ClusterManager::nanos6GetInfo(info);
+	}
+
 }

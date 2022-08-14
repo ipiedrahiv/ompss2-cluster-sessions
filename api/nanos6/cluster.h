@@ -50,6 +50,33 @@ typedef enum {
 	nanos6_spawn_by_one         // Spawn with granularity one
 } nanos6_spawn_policy_t;
 
+typedef enum {
+	nanos6_spawn_lazy = 0,      // use lazy transfer during shrink process.
+	nanos6_spawn_eager          // use eager transfer and move everything to home
+} nanos6_shrink_transfer_policy_t;
+
+
+typedef struct cluster_info_t {
+	nanos6_spawn_policy_t spawn_policy;
+	nanos6_shrink_transfer_policy_t transfer_policy;
+	unsigned long cluster_num_min_nodes;
+	unsigned long cluster_num_max_nodes;
+	unsigned long cluster_num_nodes;
+
+	int numMessageHandlerWorkers;
+	int namespace_enabled;
+	int disable_remote_connect;
+	int disable_autowait;
+	int eager_weak_fetch;
+	int eager_send;
+	int merge_release_and_finish;
+
+	void *virtual_region_start;
+	unsigned long virtual_region_size;
+
+	void *distributed_region_start;
+	unsigned long distributed_region_size;
+} cluster_info_t;
 
 //! Like nanos6_library_mode_init but requires argc and argv. It is intended to be used in cluster
 //! mode only
@@ -165,6 +192,9 @@ int nanos6_cluster_resize_with_policy(int delta, nanos6_spawn_policy_t policy);
 int nanos6_serialize(void *start, size_t nbytes, size_t process, size_t id, int checkpoint);
 
 void nanos6_fail(const char message[]);
+
+//! Get the cluster info in a struct... see struct definition before.
+int nanos6_get_cluster_info(struct cluster_info_t *info);
 
 #ifdef __cplusplus
 }

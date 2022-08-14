@@ -658,6 +658,33 @@ public:
 
 	static int nanos6Resize(int delta, nanos6_spawn_policy_t policy);
 
+	static int nanos6GetInfo(cluster_info_t *info)
+	{
+		assert(_singleton != nullptr);
+
+		*info = {
+			.spawn_policy = _singleton->_dataInit.defaultSpawnPolicy,
+			.transfer_policy = _singleton->_dataInit.defaultShrinkTransferPolicy,
+			.cluster_num_min_nodes = _singleton->_dataInit._numMinNodes,
+			.cluster_num_max_nodes = _singleton->_dataInit._numMaxNodes,
+
+			.cluster_num_nodes = (unsigned long) ClusterManager::clusterSize(),
+			.numMessageHandlerWorkers = ClusterManager::getNumMessageHandlerWorkers(),
+			.namespace_enabled = ClusterManager::getDisableRemote(),
+			.disable_remote_connect = ClusterManager::getDisableRemoteConnect(),
+			.disable_autowait = ClusterManager::getDisableAutowait(),
+			.eager_weak_fetch = ClusterManager::getEagerWeakFetch(),
+			.eager_send = ClusterManager::getEagerSend(),
+			.merge_release_and_finish = ClusterManager::getMergeReleaseAndFinish(),
+
+			.virtual_region_start = _singleton->_dataInit._virtualAllocation.getStartAddress(),
+			.virtual_region_size = _singleton->_dataInit._virtualAllocation.getSize(),
+
+			.distributed_region_start = _singleton->_dataInit._virtualDistributedRegion.getStartAddress(),
+			.distributed_region_size = _singleton->_dataInit._virtualDistributedRegion.getSize()
+		};
+		return 0;
+	}
 
 };
 

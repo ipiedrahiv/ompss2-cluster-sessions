@@ -309,3 +309,16 @@ int nanos6_fail(const char message[])
 	(*symbol)(message);
 }
 
+int nanos6_get_cluster_info(cluster_info_t *info)
+{
+	typedef int nanos6_get_cluster_info_t(cluster_info_t *info);
+
+	static nanos6_get_cluster_info_t *symbol = NULL;
+	if (__builtin_expect(symbol == NULL, 0)) {
+		symbol = (nanos6_get_cluster_info_t *) _nanos6_resolve_symbol(
+			"nanos6_get_cluster_info", "cluster", NULL);
+	}
+
+	(*symbol)(info);
+}
+

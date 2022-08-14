@@ -26,3 +26,4 @@ RESOLVE_API_FUNCTION(nanos6_cluster_resize, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_cluster_resize_with_policy, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_serialize, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_fail, "cluster", NULL);
+RESOLVE_API_FUNCTION(nanos6_get_cluster_info, "cluster", NULL);
