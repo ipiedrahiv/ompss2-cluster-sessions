@@ -23,6 +23,8 @@
 #include "ClusterUtil.hpp"
 #include "WriteID.hpp"
 
+#include "HackReport.hpp"
+
 #include "system/ompss/TaskWait.hpp"
 
 
@@ -72,6 +74,9 @@ int ClusterManager::nanos6Resize(int delta, nanos6_spawn_policy_t policy)
 	);
 
 	TaskWait::taskWait("nanos6Resize");
+
+	HackReport &report = ClusterManager::getReport();
+	report.init(oldSize, expectedSize, delta);
 
 	int newSize = -1;
 
@@ -275,6 +280,8 @@ int ClusterManager::nanos6Resize(int delta, nanos6_spawn_policy_t policy)
 		"Couldn't spawn: ", expectedSize, " new processes; only: ", newSize, " were created."
 	);
 
+	report.fini();
+
 	return expectedSize;
 }
 
@@ -285,7 +292,20 @@ int ClusterManager::resizeFull(
 	int delta, size_t nEntries, const MessageSpawnHostInfo *entries
 ) {
 	const int oldSize = ClusterManager::clusterSize();
-	const int newSize = _singleton->_msn->messengerSpawn(delta, "");
+
+	int newSize = 0;
+
+	if (ClusterManager::isMasterNode()) {
+		printf("# Spawning: group %d\n", delta);
+
+		const timespec tmp1 = HackReport::getTime();
+		newSize = _singleton->_msn->messengerSpawn(delta, "");
+		const timespec tmp2 = HackReport::getTime();
+		ClusterManager::getReport().MPITime += HackReport::diffToDouble(tmp1, tmp2);
+	} else {
+		newSize = _singleton->_msn->messengerSpawn(delta, "");
+	}
+
 	FatalErrorHandler::failIf(newSize != oldSize + delta,
 		"Group spawned to:", newSize, " but expected:", oldSize, "+", delta);
 
@@ -360,7 +380,19 @@ int ClusterManager::resizeByPolicy(
 			ClusterManager::synchronizeAll();
 		}
 
-		const int newSize = _singleton->_msn->messengerSpawn(deltaStep, info.hostname);
+		int newSize = 0;
+		if (ClusterManager::isMasterNode()) {
+			printf("# Spawning: %s %d\n", info.hostname, deltaStep);
+
+			const timespec tmp1 = HackReport::getTime();
+			newSize = _singleton->_msn->messengerSpawn(deltaStep, info.hostname);
+			const timespec tmp2 = HackReport::getTime();
+
+			ClusterManager::getReport().MPITime += HackReport::diffToDouble(tmp1, tmp2);
+		} else {
+			newSize = _singleton->_msn->messengerSpawn(deltaStep, info.hostname);
+		}
+
 		const int oldSize = ClusterManager::clusterSize();
 
 		assert(newSize == oldSize + deltaStep);
@@ -499,9 +531,8 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 	const MessageShrinkDataInfo *dataInfos = msgShrink->getEntries();
 	std::vector<DataTransfer *> transferList;
 
-	struct timespec startRes;
 	if (ClusterManager::isMasterNode()) {
-		clock_gettime(CLOCK_MONOTONIC, &startRes);
+		ClusterManager::getReport().startTransfer = HackReport::getTime();
 	}
 
 	for (size_t i = 0; i < msgShrink->getNEntries(); ++i) {
@@ -548,20 +579,21 @@ int ClusterManager::handleResizeMessage(const MessageResize<MessageShrinkDataInf
 
 	ClusterManager::synchronizeAll();
 
-	struct timespec endRes;
+	int newSize = 0;
 	if (ClusterManager::isMasterNode()) {
-		clock_gettime(CLOCK_MONOTONIC, &endRes);
-	}
+		HackReport &report = ClusterManager::getReport();
 
-	// messenger shrink returns zero on the dying nodes.
-	const int newSize = _singleton->_msn->messengerShrink(delta);
-	assert(newSize >= 0); // negative means error
-
-	if (ClusterManager::isMasterNode()) {
-		struct timespec deltaRes = clusterDiffTime(&startRes, &endRes);
-
-		printf("# Resize_transfer:%d->%d: %lg\n",
-			oldSize, newSize, deltaRes.tv_sec * 1.0E9 + deltaRes.tv_nsec);
+		// messenger shrink returns zero on the dying nodes.
+		report.endTransfer = HackReport::getTime();
+		newSize = _singleton->_msn->messengerShrink(delta);
+		const timespec tmp2 = HackReport::getTime();
+		report.MPITime += HackReport::diffToDouble(report.endTransfer, tmp2);
+		// master never dies
+		assert(newSize > 0); // negative means error
+	} else {
+		newSize = _singleton->_msn->messengerShrink(delta);
+		// messenger shrink returns zero on the dying nodes.
+		assert(newSize >= 0); // negative means error
 	}
 
 	if (newSize > 0) { // Condition for surviving nodes

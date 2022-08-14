@@ -21,6 +21,8 @@
 #include <ClusterNode.hpp>
 #include "memory/directory/Directory.hpp"
 
+#include <HackReport.hpp>
+
 namespace ExecutionWorkflow
 {
 	class ClusterDataCopyStep;
@@ -42,6 +44,8 @@ public:
 			return _numMinNodes != _numMaxNodes;
 		}
 	};
+
+	HackReport _report;
 
 private:
 	bool _clusterRequested; // Built with cluster and cluster.communication is not disabled
@@ -102,6 +106,13 @@ private:
 	);
 
 public:
+
+	static HackReport &getReport()
+	{
+		assert(_singleton != nullptr);
+		return _singleton->_report;
+	}
+
 	//! \brief Spawn new processes.
 	//!
 	//! \param[in] Number of desired new nodes
