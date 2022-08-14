@@ -1358,6 +1358,7 @@ noinst_HEADERS += \
 	src/cluster/ClusterShutdownCallback.hpp \
 	src/cluster/ClusterManager.hpp \
 	src/cluster/ClusterMetrics.hpp \
+	src/cluster/HackReport.hpp \
 	src/cluster/ClusterUtil.hpp \
 	src/cluster/ClusterMemoryManagement.hpp \
 	src/cluster/NodeNamespace.hpp \
