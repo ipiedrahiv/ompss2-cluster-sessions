@@ -782,7 +782,7 @@ int MPIMessenger::messengerSpawn(int delta, std::string hostname)
 	int ret = 0;
 
 	MPI_Info info = MPI_INFO_NULL;
-	if (!hostname.empty()) {
+	if (!hostname.empty() && _wrank == 0) {
 		ret = MPI_Info_create(&info);
 		MPIErrorHandler::handle(ret, INTRA_COMM);
 

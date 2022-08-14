@@ -97,6 +97,10 @@ int ClusterManager::nanos6Resize(int delta, nanos6_spawn_policy_t policy)
 
 		// TODO: Any spawn policy to implement may be done here in the hostInfos.
 		std::vector<MessageSpawnHostInfo> hostInfos = SlurmAPI::getSpawnHostInfoVector(delta);
+		if (hostInfos.empty()){
+			FatalErrorHandler::warn("There are not hosts/spots to spawn more processes");
+			return oldSize;
+		}
 
 		// Master sends spawn messages to all the OLD world
 		MessageSpawn msgSpawn(policy, delta, hostInfos);
@@ -316,9 +320,10 @@ int ClusterManager::resizeFull(
 			++spawned;
 		}
 		if (SlurmAPI::isEnabled()) {
-			// This update is wrong because we don't know where srun set the new processes.
-			// To do it properly we need to do a gather from master to get accurate hostname.
-			// At the moment this is not an issue as this policy is not recommended.
+			// This update is wrong because we don't know exactly where srun sets the new processes.
+			// To do it properly we need to do a gather from master to get accurate hostname.  At
+			// the moment this is not an issue as this policy is not recommended. I only use it for
+			// local benchmarks
 			SlurmAPI::deltaProcessToHostname(info.hostname, info.nprocs);
 		}
 	}
@@ -383,6 +388,11 @@ int ClusterManager::resizeByPolicy(
 			}
 		}
 
+		// Update hostname counter in Slurm API
+		if (SlurmAPI::isEnabled()) {
+			SlurmAPI::deltaProcessToHostname(info.hostname, deltaStep);
+		}
+
 		// Update the spawnInfos list and remove empty entry
 		info.nprocs -= deltaStep;
 		pending -= deltaStep;
@@ -395,11 +405,6 @@ int ClusterManager::resizeByPolicy(
 			assert(pending > 0);
 			MessageSpawn msgSpawn_i(policy, pending, spawnInfos);
 			ClusterManager::sendMessageToAll(&msgSpawn_i, true, oldSize, newSize);
-		}
-
-		// Update hostname counter in Slurm API
-		if (SlurmAPI::isEnabled()) {
-			SlurmAPI::deltaProcessToHostname(info.hostname, deltaStep);
 		}
 	}
 	assert(pending == 0);

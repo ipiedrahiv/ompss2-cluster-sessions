@@ -69,6 +69,12 @@ public:
 		assert(_content != nullptr);
 		assert(deltaNodes != 0);
 
+#ifndef NDEBUG
+		if (deltaNodes > 0) {
+			assert(nEntries > 0);
+		}
+#endif // NDEBUG
+
 		_content->_policy = policy;
 		_content->_deltaNodes = deltaNodes;
 		_content->_nEntries = nEntries;
