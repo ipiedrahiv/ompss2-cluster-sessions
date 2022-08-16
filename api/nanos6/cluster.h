@@ -56,7 +56,7 @@ typedef enum {
 } nanos6_shrink_transfer_policy_t;
 
 
-typedef struct cluster_info_t {
+typedef struct nanos6_cluster_info {
 	nanos6_spawn_policy_t spawn_policy;
 	nanos6_shrink_transfer_policy_t transfer_policy;
 	unsigned long cluster_num_min_nodes;
@@ -76,7 +76,7 @@ typedef struct cluster_info_t {
 
 	void *distributed_region_start;
 	unsigned long distributed_region_size;
-} cluster_info_t;
+} nanos6_cluster_info_t;
 
 //! Like nanos6_library_mode_init but requires argc and argv. It is intended to be used in cluster
 //! mode only
@@ -194,7 +194,7 @@ int nanos6_serialize(void *start, size_t nbytes, size_t process, size_t id, int 
 void nanos6_fail(const char message[]);
 
 //! Get the cluster info in a struct... see struct definition before.
-int nanos6_get_cluster_info(struct cluster_info_t *info);
+int nanos6_get_cluster_info(nanos6_cluster_info_t *info);
 
 #ifdef __cplusplus
 }

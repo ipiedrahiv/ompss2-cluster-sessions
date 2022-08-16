@@ -658,7 +658,7 @@ public:
 
 	static int nanos6Resize(int delta, nanos6_spawn_policy_t policy);
 
-	static int nanos6GetInfo(cluster_info_t *info)
+	static int nanos6GetInfo(nanos6_cluster_info_t *info)
 	{
 		assert(_singleton != nullptr);
 
@@ -670,7 +670,7 @@ public:
 
 			.cluster_num_nodes = (unsigned long) ClusterManager::clusterSize(),
 			.numMessageHandlerWorkers = ClusterManager::getNumMessageHandlerWorkers(),
-			.namespace_enabled = ClusterManager::getDisableRemote(),
+			.namespace_enabled = !ClusterManager::getDisableRemote(),
 			.disable_remote_connect = ClusterManager::getDisableRemoteConnect(),
 			.disable_autowait = ClusterManager::getDisableAutowait(),
 			.eager_weak_fetch = ClusterManager::getEagerWeakFetch(),
