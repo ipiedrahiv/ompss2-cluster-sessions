@@ -87,65 +87,69 @@ static std::vector<MessageShrinkDataInfo> getEagerlyTransfers(
 				homeNodes->end(),
 				[&](const HomeMapEntry *entry) -> bool
 				{
+					assert(entry->getHomeNode()->getType() == nanos6_cluster_device);
 					return oldClusterLocation != entry->getHomeNode();
 				}
 			);
 
-			if (needsUpdate) {
-				// Some update is needed
-				for (const HomeMapEntry *entry : *homeNodes) {
-					const MemoryPlace *homeLocation = entry->getHomeNode();
+			// Some update is needed
+			for (const HomeMapEntry *entry : *homeNodes) {
+				const MemoryPlace *homeLocation = entry->getHomeNode();
 
-					const nanos6_device_t homeDeviceType = homeLocation->getType();
+				const nanos6_device_t homeDeviceType = homeLocation->getType();
 
-					assert(homeDeviceType == nanos6_host_device
-						|| homeDeviceType == nanos6_cluster_device);
+				assert(homeDeviceType == nanos6_host_device
+					|| homeDeviceType == nanos6_cluster_device);
 
-					const ClusterMemoryNode *newClusterLocation
-						= (homeDeviceType == nanos6_host_device)
-						? thisClusterLocation
-						: dynamic_cast<const ClusterMemoryNode*>(homeLocation);
+				const ClusterMemoryNode *newClusterLocation
+					= (homeDeviceType == nanos6_host_device)
+					? thisClusterLocation
+					: dynamic_cast<const ClusterMemoryNode*>(homeLocation);
 
-					assert(newClusterLocation != nullptr);
+				assert(newClusterLocation != nullptr);
 
-					const DataAccessRegion subregion = region.intersect(entry->getAccessRegion());
-					assert(subregion.getSize() != 0);
+				const DataAccessRegion subregion = region.intersect(entry->getAccessRegion());
+				assert(subregion.getSize() != 0);
 
-					DataAccess *newDataAccess = ObjectAllocator<DataAccess>::newObject(*dataAccess);
-					newDataAccess->setAccessRegion(subregion);
+				DataAccess *newDataAccess = ObjectAllocator<DataAccess>::newObject(*dataAccess);
+				newDataAccess->setAccessRegion(subregion);
 
-					if (oldClusterLocation != newClusterLocation) {
-						// New location should be in the expected size range because the dmalloc
-						// redistribution already took place here.
-						report.addTransfer(subregion);
-						newDataAccess->setLocation(newClusterLocation);
-
-						// oldLocation is set only for the accesses we want to share. The other
-						// accesses are ignored.
-						MessageShrinkDataInfo shrinkInfo = {
-							.region = subregion,
-							.oldLocationIdx = oldClusterLocation->getIndex(),
-							.newLocationIdx = newClusterLocation->getIndex(),
-							.oldWriteId = oldWriteId,
-							.newWriteId = newDataAccess->getWriteID(),
-							.tag = tag++  // TODO: Get the right tag here...
-						};
-
-						shrinkDataInfo.push_back(shrinkInfo);
-					}
-
-					if (oldwriteIDNode >= expectedSize) {
-						newDataAccess->setNewWriteID();
-					}
-
-					toRegisterLater.push_back(newDataAccess);
+				// All the ids created in a dying node need to be updated. Otherwise in re-spawn may
+				// be conflicts
+				if (oldwriteIDNode >= expectedSize) {
+					newDataAccess->setNewWriteID();
 				}
 
-				accessStructures._removalBlockers.fetch_sub(1);
+				// New location should be in the expected size range because the dmalloc
+				// redistribution already took place here.
+				newDataAccess->setLocation(newClusterLocation);
+				if (newClusterLocation != oldClusterLocation) {
+					report.addTransfer(subregion);
+				}
+
+				// We need to add all the regions in the transfer, the receiver will filter them.
+				MessageShrinkDataInfo shrinkInfo = {
+					.region = subregion,
+					.oldLocationIdx = oldClusterLocation->getIndex(),
+					.newLocationIdx = newClusterLocation->getIndex(),
+					.oldWriteId = oldWriteId,
+					.newWriteId = newDataAccess->getWriteID(),
+					.tag = tag++  // TODO: Get the right tag here...
+				};
+				shrinkDataInfo.push_back(shrinkInfo);
+
+				if (needsUpdate) {
+					toRegisterLater.push_back(newDataAccess);
+				}
 			}
 			delete homeNodes;
 
-			return needsUpdate; // If updated, remove the access, we will add the fragments latter
+			if (needsUpdate) {
+				accessStructures._removalBlockers.fetch_sub(1);
+				return true;
+			}
+
+			return false; // If updated, remove the access, we will add the fragments latter
 		});
 
 	for (DataAccess *access: toRegisterLater) {
@@ -400,9 +404,9 @@ int ClusterManager::nanos6Resize(int delta, nanos6_spawn_policy_t policy)
 
 		std::vector<MessageShrinkDataInfo> shrinkDataInfo;
 		if (transferPolicy == nanos6_spawn_lazy) {
-			shrinkDataInfo = getEagerlyTransfers(accessStructures, expectedSize);
-		} else if (transferPolicy == nanos6_spawn_eager) {
 			shrinkDataInfo = getLazyTransfers(accessStructures, expectedSize);
+		} else if (transferPolicy == nanos6_spawn_eager) {
+			shrinkDataInfo = getEagerlyTransfers(accessStructures, expectedSize);
 		} else {
 			FatalErrorHandler::fail("defaultShrinkTransferPolicy has unmanaged value.");
 		}
@@ -683,8 +687,10 @@ int ClusterManager::handleResizeMessage(const MessageShrink *msgShrink)
 	const MessageShrinkDataInfo *dataInfos = msgShrink->getEntries();
 	std::vector<DataTransfer *> transferList;
 
+	HackReport &report = ClusterManager::getReport();
+
 	if (ClusterManager::isMasterNode()) {
-		ClusterManager::getReport().startTransfer = HackReport::getTime();
+		report.startTransfer = HackReport::getTime();
 	}
 
 	for (size_t i = 0; i < msgShrink->getNEntries(); ++i) {
@@ -733,8 +739,6 @@ int ClusterManager::handleResizeMessage(const MessageShrink *msgShrink)
 
 	int newSize = 0;
 	if (ClusterManager::isMasterNode()) {
-		HackReport &report = ClusterManager::getReport();
-
 		// messenger shrink returns zero on the dying nodes.
 		report.endTransfer = HackReport::getTime();
 		newSize = _singleton->_msn->messengerShrink(delta);
