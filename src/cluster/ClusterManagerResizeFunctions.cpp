@@ -55,22 +55,23 @@ static std::vector<MessageShrinkDataInfo> getEagerlyTransfers(
 			const DataAccessRegion &region = dataAccess->getAccessRegion();
 			assert(!region.empty());
 
+			const nanos6_device_t accessDeviceType = accessLocation->getType();
+
 			const WriteID oldWriteId = dataAccess->getWriteID();
 			const int oldwriteIDNode = WriteIDManager::getWriteIDNode(oldWriteId);
-			const nanos6_device_t accessDeviceType = accessLocation->getType();
+
+			// All the ids created in a dying node need to be updated. Otherwise in re-spawn may
+			// be conflicts
+			if (oldwriteIDNode >= expectedSize) {
+				dataAccess->setNewWriteID();
+			}
+			const WriteID newWriteId = dataAccess->getWriteID();
 
 			const ClusterMemoryNode *oldClusterLocation = nullptr;
 			if (accessDeviceType == nanos6_cluster_device) {
-				// By default we don't migrate the accesses
 				oldClusterLocation = dynamic_cast<const ClusterMemoryNode*>(accessLocation);
 			} else if (accessDeviceType == nanos6_host_device) {
-				if (VirtualMemoryManagement::isDistributedRegion(region)) {
-					oldClusterLocation = thisClusterLocation;
-				} else {
-					// We don't touch local accesses because they must be already here, so return
-					// false to continue
-					return false;
-				}
+				oldClusterLocation = thisClusterLocation;
 			} else {
 				FatalErrorHandler::fail(
 					"Region: ", region, " has unsupported access type: ", accessDeviceType
@@ -79,77 +80,99 @@ static std::vector<MessageShrinkDataInfo> getEagerlyTransfers(
 
 			assert(oldClusterLocation != nullptr);
 
-			const Directory::HomeNodesArray *homeNodes = Directory::find(region);
+			if (VirtualMemoryManagement::isDistributedRegion(region)) {
 
-			// The current policy to move all data back to its home node.
-			const bool needsUpdate = std::any_of(
-				homeNodes->begin(),
-				homeNodes->end(),
-				[&](const HomeMapEntry *entry) -> bool
-				{
-					assert(entry->getHomeNode()->getType() == nanos6_cluster_device);
-					return oldClusterLocation != entry->getHomeNode();
+				assert(oldClusterLocation->getCommIndex() < ClusterManager::clusterSize());
+
+				// When the region is distributed, split it in home nodes portions.
+				const Directory::HomeNodesArray *homeNodes = Directory::find(region);
+
+				// The current policy to move all data back to its home node.
+				const bool needsUpdate = std::any_of(
+					homeNodes->begin(),
+					homeNodes->end(),
+					[&](const HomeMapEntry *entry) -> bool
+					{
+						assert(entry->getHomeNode()->getType() == nanos6_cluster_device);
+						return oldClusterLocation != entry->getHomeNode();
+					}
+				);
+
+				// Some update is needed
+				for (const HomeMapEntry *entry : *homeNodes) {
+					const MemoryPlace *homeLocation = entry->getHomeNode();
+
+					const nanos6_device_t homeDeviceType = homeLocation->getType();
+
+					assert(homeDeviceType == nanos6_host_device
+						|| homeDeviceType == nanos6_cluster_device);
+
+					const ClusterMemoryNode *newClusterLocation
+						= (homeDeviceType == nanos6_host_device)
+						? thisClusterLocation
+						: dynamic_cast<const ClusterMemoryNode*>(homeLocation);
+
+					assert(newClusterLocation != nullptr);
+
+					const DataAccessRegion subregion = region.intersect(entry->getAccessRegion());
+					assert(subregion.getSize() != 0);
+
+					DataAccess *newDataAccess = ObjectAllocator<DataAccess>::newObject(*dataAccess);
+					newDataAccess->setAccessRegion(subregion);
+
+					// New location should be in the expected size range because the dmalloc
+					// redistribution already took place here.
+					if (newClusterLocation != oldClusterLocation) {
+						newDataAccess->setLocation(newClusterLocation);
+
+						if (newWriteId == oldWriteId) {
+							// The transferred regions need a new ID otherwise the ones generated
+							// locally will look like are still here and transfer may be needed every
+							// time.
+							newDataAccess->setNewWriteID();
+						}
+
+						report.addTransfer(subregion);
+					}
+
+					// We need to add all the regions in the transfer, the receiver will filter them.
+					MessageShrinkDataInfo shrinkInfo = {
+						.region = subregion,
+						.oldLocationIdx = oldClusterLocation->getIndex(),
+						.newLocationIdx = newClusterLocation->getIndex(),
+						.oldWriteId = oldWriteId,
+						.newWriteId = newDataAccess->getWriteID(),
+						.tag = tag++  // TODO: Get the right tag here...
+					};
+					shrinkDataInfo.push_back(shrinkInfo);
+
+					if (needsUpdate) {
+						toRegisterLater.push_back(newDataAccess);
+					}
 				}
-			);
+				delete homeNodes;
 
-			// Some update is needed
-			for (const HomeMapEntry *entry : *homeNodes) {
-				const MemoryPlace *homeLocation = entry->getHomeNode();
-
-				const nanos6_device_t homeDeviceType = homeLocation->getType();
-
-				assert(homeDeviceType == nanos6_host_device
-					|| homeDeviceType == nanos6_cluster_device);
-
-				const ClusterMemoryNode *newClusterLocation
-					= (homeDeviceType == nanos6_host_device)
-					? thisClusterLocation
-					: dynamic_cast<const ClusterMemoryNode*>(homeLocation);
-
-				assert(newClusterLocation != nullptr);
-
-				const DataAccessRegion subregion = region.intersect(entry->getAccessRegion());
-				assert(subregion.getSize() != 0);
-
-				DataAccess *newDataAccess = ObjectAllocator<DataAccess>::newObject(*dataAccess);
-				newDataAccess->setAccessRegion(subregion);
-
-				// All the ids created in a dying node need to be updated. Otherwise in re-spawn may
-				// be conflicts
-				if (oldwriteIDNode >= expectedSize) {
-					newDataAccess->setNewWriteID();
+				if (needsUpdate) {
+					accessStructures._removalBlockers.fetch_sub(1);
+					return true;  // Remove the access because it was fragmented..
 				}
 
-				// New location should be in the expected size range because the dmalloc
-				// redistribution already took place here.
-				newDataAccess->setLocation(newClusterLocation);
-				if (newClusterLocation != oldClusterLocation) {
-					report.addTransfer(subregion);
-				}
-
-				// We need to add all the regions in the transfer, the receiver will filter them.
+			} else {
+				// If the region is not distributed it may be here because we are after a taskwait.
+				// So we may need to update the write ID in case it was last modified in a remote
+				// dying node.
 				MessageShrinkDataInfo shrinkInfo = {
-					.region = subregion,
-					.oldLocationIdx = oldClusterLocation->getIndex(),
-					.newLocationIdx = newClusterLocation->getIndex(),
+					.region = region,
+					.oldLocationIdx = thisClusterLocation->getIndex(),
+					.newLocationIdx = thisClusterLocation->getIndex(),
 					.oldWriteId = oldWriteId,
-					.newWriteId = newDataAccess->getWriteID(),
+					.newWriteId = dataAccess->getWriteID(),
 					.tag = tag++  // TODO: Get the right tag here...
 				};
 				shrinkDataInfo.push_back(shrinkInfo);
-
-				if (needsUpdate) {
-					toRegisterLater.push_back(newDataAccess);
-				}
-			}
-			delete homeNodes;
-
-			if (needsUpdate) {
-				accessStructures._removalBlockers.fetch_sub(1);
-				return true;
 			}
 
-			return false; // If updated, remove the access, we will add the fragments latter
+			return false;
 		});
 
 	for (DataAccess *access: toRegisterLater) {
@@ -165,7 +188,7 @@ std::vector<MessageShrinkDataInfo> getLazyTransfers(
 	TaskDataAccesses &accessStructures, int expectedSize
 ) {
 	HackReport &report = ClusterManager::getReport();
-	const ClusterMemoryNode * const thisLocation = ClusterManager::getCurrentMemoryNode();
+	const ClusterMemoryNode * const thisClusterLocation = ClusterManager::getCurrentMemoryNode();
 
 	int tag = 1;
 	std::vector<MessageShrinkDataInfo> shrinkDataInfo;
@@ -175,9 +198,6 @@ std::vector<MessageShrinkDataInfo> getLazyTransfers(
 			DataAccess *dataAccess = &(*position);
 			assert(dataAccess != nullptr);
 
-			const MemoryPlace *oldLocation = nullptr;
-			const MemoryPlace *newLocation = nullptr;
-
 			const MemoryPlace *accessLocation = dataAccess->getLocation();
 			assert(accessLocation != nullptr);
 
@@ -186,21 +206,46 @@ std::vector<MessageShrinkDataInfo> getLazyTransfers(
 
 			const nanos6_device_t accessDeviceType = accessLocation->getType();
 
+			const WriteID oldWriteId = dataAccess->getWriteID();
+			const int writeIDNode = WriteIDManager::getWriteIDNode(oldWriteId);
+
+			// All the ids created in a dying node need to be updated. Otherwise in re-spawn may
+			// be conflicts
+			if (writeIDNode >= expectedSize) {
+				dataAccess->setNewWriteID();
+			}
+
+			const ClusterMemoryNode *oldClusterLocation = nullptr, *newClusterLocation = nullptr;;
+
 			if (accessDeviceType == nanos6_cluster_device) {
+				// By default the accesses won't migrate unless they are in a dying node; that
+				// condition is checked latter
+				oldClusterLocation = dynamic_cast<const ClusterMemoryNode*>(accessLocation);
+				newClusterLocation = dynamic_cast<const ClusterMemoryNode*>(accessLocation);
+			} else if (accessDeviceType == nanos6_host_device) {
+				// The master accesses don't need migration. so we don;t need to migrate them.
+				oldClusterLocation = thisClusterLocation;
+				newClusterLocation = thisClusterLocation;
+			} else {
+				FatalErrorHandler::fail(
+					"Region: ", region, " has unsupported access type: ", accessDeviceType
+				);
+			}
 
-				// By default we don't migrate the accesses
-				oldLocation = accessLocation;
-				newLocation = accessLocation;
+			// In this point we have two locations, that we may update conditionally if they are
+			// distributed and are in a dying node.
+			assert(newClusterLocation != nullptr);
+			assert(oldClusterLocation != nullptr);
+			assert(oldClusterLocation->getCommIndex() < ClusterManager::clusterSize());
 
-				const ClusterMemoryNode *oldClusterLocation
-					= dynamic_cast<const ClusterMemoryNode*>(oldLocation);
-
-				assert(oldClusterLocation != nullptr);
-				assert(oldClusterLocation->getCommIndex() < ClusterManager::clusterSize());
+			if (VirtualMemoryManagement::isDistributedRegion(region)) {
+				// Local regions will be here any way and don't need migration (just update the
+				// writeId sometimes). So we don't need to go into this for local regions because we
+				// are after a taskwait and all local regions are in their home.
 
 				if (oldClusterLocation->getCommIndex() >= expectedSize) {
 					// Come here only if the current location will die after shrinking; so the
-					// policy to migrate can be implemented inside this scope.
+					// policy decide migration target is decided here.
 
 					std::vector<size_t> bytes((size_t)expectedSize);
 					const Directory::HomeNodesArray *homeNodes = Directory::find(region);
@@ -215,7 +260,7 @@ std::vector<MessageShrinkDataInfo> getLazyTransfers(
 
 						const size_t homeNodeId
 							= (location->getType() == nanos6_host_device)
-							? thisLocation->getIndex()
+							? thisClusterLocation->getIndex()
 							: location->getIndex();
 
 						// New location should be in the expected size range because the dmalloc
@@ -233,45 +278,22 @@ std::vector<MessageShrinkDataInfo> getLazyTransfers(
 						bytes.begin(), std::max_element(bytes.begin(), bytes.end())
 					);
 
-					newLocation = ClusterManager::getMemoryNode(destinationIndex);
-
-					dataAccess->setLocation(newLocation);
+					newClusterLocation = ClusterManager::getMemoryNode(destinationIndex);
+					dataAccess->setLocation(newClusterLocation);
 				}
-			} else if (accessDeviceType == nanos6_host_device) {
-				if (VirtualMemoryManagement::isDistributedRegion(region)) {
-					// This information is only for the madvise purposes. Because the accesses
-					// on root never need to migrate.
-					oldLocation = thisLocation;
-					newLocation = thisLocation;
-				}
-
-			} else {
-				FatalErrorHandler::fail(
-					"Region: ", region, " has unsupported access type: ", accessDeviceType
-				);
 			}
 
-			const WriteID oldWriteId = dataAccess->getWriteID();
-			const int writeIDNode = WriteIDManager::getWriteIDNode(oldWriteId);
+			assert(newClusterLocation->getCommIndex() < expectedSize);
 
-			if (writeIDNode >= expectedSize) {
-				dataAccess->setNewWriteID();
-			}
-
-			if (oldLocation != nullptr) {
-				// oldLocation is set only for the accesses we want to share. The other accesses
-				// are ignored.
-				MessageShrinkDataInfo shrinkInfo = {
-					.region = region,
-					.oldLocationIdx = oldLocation->getIndex(),
-					.newLocationIdx = newLocation->getIndex(),
-					.oldWriteId = oldWriteId,
-					.newWriteId = dataAccess->getWriteID(),
-					.tag = tag++  // TODO: Get the right tag here...
-				};
-
-				shrinkDataInfo.push_back(shrinkInfo);
-			}
+			MessageShrinkDataInfo shrinkInfo = {
+				.region = region,
+				.oldLocationIdx = oldClusterLocation->getIndex(),
+				.newLocationIdx = newClusterLocation->getIndex(),
+				.oldWriteId = oldWriteId,
+				.newWriteId = dataAccess->getWriteID(),
+				.tag = tag++  // TODO: Get the right tag here...
+			};
+			shrinkDataInfo.push_back(shrinkInfo);
 
 			return true; // continue, to process all access fragments
 		});
