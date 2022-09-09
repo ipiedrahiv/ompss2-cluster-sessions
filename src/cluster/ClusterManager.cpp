@@ -32,6 +32,8 @@
 #include "executors/workflow/cluster/ExecutionWorkflowCluster.hpp"
 #include "executors/threads/WorkerThread.hpp"
 
+#include "executors/threads/CPUManager.hpp"
+
 #if HAVE_SLURM
 #include "SlurmAPI.hpp"
 SlurmAPI *SlurmAPI::_singleton = nullptr;
@@ -440,6 +442,32 @@ void ClusterManager::fetchVector(
 	ClusterManager::sendMessage(msg, remoteNode);
 }
 
+int ClusterManager::nanos6GetInfo(nanos6_cluster_info_t *info)
+{
+	assert(_singleton != nullptr);
+	assert(info != nullptr);
 
+	info->spawn_policy = _singleton->_dataInit.defaultSpawnPolicy;
+	info->transfer_policy = _singleton->_dataInit.defaultShrinkTransferPolicy;
+	info->cluster_num_min_nodes = _singleton->_dataInit._numMinNodes;
+	info->cluster_num_max_nodes = _singleton->_dataInit._numMaxNodes;
+	info->malleability_enabled = _singleton->_dataInit.clusterMalleabilityEnabled();
 
+	info->cluster_num_nodes = (unsigned long) ClusterManager::clusterSize();
+	info->numMessageHandlerWorkers = ClusterManager::getNumMessageHandlerWorkers();
+	info->namespace_enabled = !ClusterManager::getDisableRemote();
+	info->disable_remote_connect = ClusterManager::getDisableRemoteConnect();
+	info->disable_autowait = ClusterManager::getDisableAutowait();
+	info->eager_weak_fetch = ClusterManager::getEagerWeakFetch();
+	info->eager_send = ClusterManager::getEagerSend();
+	info->merge_release_and_finish = ClusterManager::getMergeReleaseAndFinish();
+	info->reserved_leader_thread = CPUManager::hasReservedCPUforLeaderThread();
 
+	info->virtual_region_start = _singleton->_dataInit._virtualAllocation.getStartAddress();
+	info->virtual_region_size = _singleton->_dataInit._virtualAllocation.getSize();
+
+	info->distributed_region_start = _singleton->_dataInit._virtualDistributedRegion.getStartAddress();
+	info->distributed_region_size = _singleton->_dataInit._virtualDistributedRegion.getSize();
+
+	return 0;
+}

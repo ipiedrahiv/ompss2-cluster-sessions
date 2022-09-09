@@ -62,6 +62,7 @@ typedef struct nanos6_cluster_info {
 	unsigned long cluster_num_min_nodes;
 	unsigned long cluster_num_max_nodes;
 	unsigned long cluster_num_nodes;
+	int malleability_enabled;
 
 	int numMessageHandlerWorkers;
 	int namespace_enabled;
@@ -70,6 +71,7 @@ typedef struct nanos6_cluster_info {
 	int eager_weak_fetch;
 	int eager_send;
 	int merge_release_and_finish;
+	int reserved_leader_thread;
 
 	void *virtual_region_start;
 	unsigned long virtual_region_size;
