@@ -690,7 +690,8 @@ namespace DataAccessRegistration {
 		/* OUT */ CPUDependencyData &hpDependencyData);
 	static inline void removeBottomMapTaskwaitOrTopLevelSink(
 		DataAccess *access, TaskDataAccesses &accessStructures, __attribute__((unused)) Task *task,
-		/* OUT */ CPUDependencyData &hpDependencyData
+		/* OUT */ CPUDependencyData &hpDependencyData,
+		bool noflush
 	);
 	static inline BottomMapEntry *fragmentBottomMapEntry(
 		BottomMapEntry *bottomMapEntry, DataAccessRegion region,
@@ -1290,9 +1291,12 @@ namespace DataAccessRegistration {
 		}
 	}
 
-	static inline void removeBottomMapTaskwaitOrTopLevelSink( DataAccess *access, TaskDataAccesses &accessStructures,
-		__attribute__((unused)) Task *task,
-		/* OUT */ CPUDependencyData &hpDependencyData
+	static inline void removeBottomMapTaskwaitOrTopLevelSink(
+		DataAccess *access,
+		TaskDataAccesses &accessStructures,
+		Task *task,
+		/* OUT */ CPUDependencyData &hpDependencyData,
+		bool noflush
 	) {
 		(void)hpDependencyData;
 		assert(access != nullptr);
@@ -1333,7 +1337,9 @@ namespace DataAccessRegistration {
 
 				const MemoryPlace *location;
 
-				if (access->getOutputLocation() && access->getOutputLocation()->isClusterLocalMemoryPlace()) {
+				if (!noflush
+					&& access->getOutputLocation()
+					&& access->getOutputLocation()->isClusterLocalMemoryPlace()) {
 					// If the output location is a local memory place, then use the local
 					// location. Note: for cases where a copy isn't needed (e.g. read accesses,
 					// distributed memory), the output location will have been cleared by the workflow.
@@ -5803,7 +5809,8 @@ namespace DataAccessRegistration {
 	void handleExitTaskwait(
 		Task *task,
 		ComputePlace *computePlace,
-		CPUDependencyData &hpDependencyData
+		CPUDependencyData &hpDependencyData,
+		bool noflush
 	) {
 		Instrument::enterHandleExitTaskwait();
 		assert(task != nullptr);
@@ -5854,7 +5861,9 @@ namespace DataAccessRegistration {
 				});
 		}
 
-		unfragmentTaskwaits(accessStructures);
+		if (!noflush) {
+			unfragmentTaskwaits(accessStructures);
+		}
 		accessStructures._taskwaitFragments.processAll(
 			/* processor: called for each task access fragment */
 			[&](TaskDataAccesses::access_fragments_t::iterator position) -> bool {
@@ -5870,7 +5879,7 @@ namespace DataAccessRegistration {
 					|| (taskwaitFragment->getObjectType() == top_level_sink_type));
 				taskwaitFragment->markAsDiscounted();
 				removeBottomMapTaskwaitOrTopLevelSink(
-					taskwaitFragment, accessStructures, task, hpDependencyData
+					taskwaitFragment, accessStructures, task, hpDependencyData, noflush
 				);
 				accessStructures._removalBlockers--;
 				if (accessStructures._removalBlockers == 0) {

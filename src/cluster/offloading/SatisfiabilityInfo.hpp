@@ -63,6 +63,7 @@ namespace TaskOffloading {
 		friend std::ostream& operator<<(std::ostream &o, SatisfiabilityInfo const &satInfo)
 		{
 			return o << "[SatReg:" << satInfo._region
+				<< " WID: " <<  satInfo._writeID
 				<< " r:" << satInfo._readSat << " w:" << satInfo._writeSat
 				<< " type:"<< satInfo._accessType << " weak:" << satInfo._weak
 				<< " eagerSendTag: " << satInfo._eagerSendTag

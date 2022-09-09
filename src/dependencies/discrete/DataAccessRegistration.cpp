@@ -486,7 +486,7 @@ namespace DataAccessRegistration {
 		}
 	}
 
-	void handleExitTaskwait(Task *task, ComputePlace *, CPUDependencyData &)
+	void handleExitTaskwait(Task *task, ComputePlace *, CPUDependencyData &, bool)
 	{
 		assert(task != nullptr);
 

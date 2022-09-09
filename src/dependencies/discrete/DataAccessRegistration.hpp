@@ -81,7 +81,8 @@ namespace DataAccessRegistration {
 
 	void handleExitTaskwait(Task *task,
 		ComputePlace *computePlace,
-		CPUDependencyData &dependencyData
+		CPUDependencyData &dependencyData,
+		bool nowait
 	);
 
 	void combineTaskReductions(Task *task, ComputePlace *computePlace);

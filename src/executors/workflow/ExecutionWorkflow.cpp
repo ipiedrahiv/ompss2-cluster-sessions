@@ -226,7 +226,7 @@ namespace ExecutionWorkflow {
 				 */
 				task->completeDelayedRelease();
 				task->markAsUnblocked();
-				DataAccessRegistration::handleExitTaskwait(task, cpu, hpDependencyData);
+				DataAccessRegistration::handleExitTaskwait(task, cpu, hpDependencyData, false);
 
 				/*
 				 * Now finish the notification step, i.e. everything after

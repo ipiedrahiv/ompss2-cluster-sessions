@@ -90,7 +90,9 @@ void TaskWait::taskWait(char const *invocationSource, bool fromUserCode, bool no
 	assert(currentTask->canBeWokenUp());
 	currentTask->markAsUnblocked();
 
-	DataAccessRegistration::handleExitTaskwait(currentTask, cpu, cpu->getDependencyData());
+	DataAccessRegistration::handleExitTaskwait(
+		currentTask, cpu, cpu->getDependencyData(), noflush
+	);
 
 	if (!done) {
 		// The instrumentation was notified that the task had been blocked
