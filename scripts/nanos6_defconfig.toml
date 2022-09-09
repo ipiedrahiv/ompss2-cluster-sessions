@@ -43,6 +43,10 @@
 	# Possible values: "default", "idle", "busy", "lewi", "greedy"
 	policy = "busy"
 
+	# Keep one CPU for the leader thread IF in cluster mode OR malleability is enabled.
+	# This is usefull for cluster polling services
+	reserve_cpu_leader = true
+
 [taskfor]
 	# Choose the total number of CPU groups that will execute the worksharing tasks (taskfors). Default
 	# is none (not set), which means that the runtime will create one taskfor group per NUMA node

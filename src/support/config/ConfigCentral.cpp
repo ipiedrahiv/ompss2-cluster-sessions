@@ -50,6 +50,7 @@ ConfigCentral::ConfigCentral() :
 
 	// CPU manager
 	registerOption<string_t>("cpumanager.policy", "default");
+	registerOption<bool_t>("cpumanager.reserve_cpu_leader", true);
 
 	// CUDA devices
 	registerOption<integer_t>("devices.cuda.page_size", 0x8000);

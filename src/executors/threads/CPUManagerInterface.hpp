@@ -110,6 +110,8 @@ private:
 
 protected:
 
+	CPUManagerInterface();
+
 	//! \brief Instrument-related private function
 	void reportInformation(size_t numSystemCPUs, size_t numNUMANodes);
 

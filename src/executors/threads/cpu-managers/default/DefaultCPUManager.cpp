@@ -22,19 +22,6 @@ size_t DefaultCPUManager::_numIdleCPUs;
 
 void DefaultCPUManager::preinitialize()
 {
-	_finishedCPUInitialization = false;
-
-	// In cluster mode, the LeaderThread is necessary, otherwise the polling services (which manage
-	// communication with other nodes) may not be run frequently enough, causing a high latency on
-	// communications. This has been observed to be a problem in test cases. But the LeaderThread
-	// normally overallocates a CPU, which means that it can preempt a worker thread that is holding
-	// the scheduler lock. In this case, no new tasks can be scheduled until all the messages have
-	// been handled.  Therefore, in cluster mode or malleable executions, leave one CPU free to be
-	// used by the LeaderThread.
-	_reserveCPUforLeaderThread
-		= (ClusterManager::inClusterMode()
-			|| ClusterManager::getInitData().clusterMalleabilityEnabled());
-
 	// Retreive the CPU mask of this process
 	int rc = sched_getaffinity(0, sizeof(cpu_set_t), &_cpuMask);
 	FatalErrorHandler::handle(rc, " when retrieving the affinity of the process");
