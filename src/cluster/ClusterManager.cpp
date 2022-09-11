@@ -466,6 +466,7 @@ int ClusterManager::nanos6GetInfo(nanos6_cluster_info_t *info)
 	info->merge_release_and_finish = ClusterManager::getMergeReleaseAndFinish();
 	info->reserved_leader_thread = CPUManager::hasReservedCPUforLeaderThread();
 	info->group_messages_enabled = ClusterManager::getGroupMessagesEnabled();
+	info->write_id_enabled = WriteIDManager::isEnabled();
 
 	info->virtual_region_start = _singleton->_dataInit._virtualAllocation.getStartAddress();
 	info->virtual_region_size = _singleton->_dataInit._virtualAllocation.getSize();

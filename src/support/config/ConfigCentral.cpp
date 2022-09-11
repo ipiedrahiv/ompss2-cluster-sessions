@@ -29,6 +29,7 @@ ConfigCentral::ConfigCentral() :
 	registerOption<integer_t>("cluster.num_message_handler_workers", 2);
 	registerOption<integer_t>("cluster.num_max_nodes", 0);
 	registerOption<bool_t>("cluster.group_messages", true);
+	registerOption<bool_t>("cluster.enable_write_id", true);
 
 	registerOption<string_t>("cluster.default_spawn_policy", "host");
 	registerOption<string_t>("cluster.default_shrink_transfer_policy", "lazy");

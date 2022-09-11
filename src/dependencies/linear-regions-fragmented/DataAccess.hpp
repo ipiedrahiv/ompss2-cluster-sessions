@@ -292,6 +292,11 @@ public:
 
 	void setWriteID(WriteID id)
 	{
+#ifndef NDEBUG
+		if (id != 0) {
+			assert(WriteIDManager::isEnabled());
+		}
+#endif // NDEBUG
 		_writeID = id;
 	}
 
@@ -299,6 +304,11 @@ public:
 	void setNewWriteID()
 	{
 		WriteID id = WriteIDManager::createWriteID();
+#ifndef NDEBUG
+		if (id != 0) {
+			assert(WriteIDManager::isEnabled());
+		}
+#endif // NDEBUG
 		setWriteID(id);
 	}
 
@@ -306,6 +316,11 @@ public:
 	void setNewLocalWriteID()
 	{
 		WriteID id = WriteIDManager::createWriteID();
+#ifndef NDEBUG
+		if (id != 0) {
+			assert(WriteIDManager::isEnabled());
+		}
+#endif // NDEBUG
 		WriteIDManager::registerWriteIDasLocal(id, getAccessRegion());
 		setWriteID(id);
 	}

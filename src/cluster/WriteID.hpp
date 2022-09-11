@@ -19,6 +19,8 @@
 #include "LinearRegionMap.hpp"
 #include "LinearRegionMapImplementation.hpp"
 
+#include "support/config/ConfigVariable.hpp"
+
 // Identify redundant data fetches using a globally unique write ID.  Each new
 // data output or inout is allocated a new write ID.  The write ID remains the
 // same for all dependent read accesses.
@@ -154,16 +156,26 @@ public:
 	{
 		assert(_singleton == nullptr);
 
-		WriteID initCounter = 1 + (((size_t)nodeIndex) << (64 - logMaxNodes));
-		_singleton = new WriteIDManager(initCounter);
-		assert(_singleton != nullptr);
+		ConfigVariable<bool> enableWriteID("cluster.enable_write_id");
+
+		if (enableWriteID.getValue()) {
+			WriteID initCounter = 1 + (((size_t)nodeIndex) << (64 - logMaxNodes));
+			_singleton = new WriteIDManager(initCounter);
+			assert(_singleton != nullptr);
+		}
 	}
 
 	static void finalize()
 	{
-		assert(_singleton != nullptr);
-		delete _singleton;
-		_singleton = nullptr;
+		if (_singleton != nullptr) {
+			delete _singleton;
+			_singleton = nullptr;
+		}
+	}
+
+	static bool isEnabled()
+	{
+		return _singleton != nullptr;
 	}
 
 	// Register a write ID as being present locally
@@ -278,9 +290,11 @@ public:
 
 	static inline WriteID createWriteID()
 	{
-		assert(_singleton != nullptr);
 		/* This happens for every access, so it should be fast */
-		return _singleton->_counter.fetch_add(1);
+		if (_singleton != nullptr) {
+			return _singleton->_counter.fetch_add(1);
+		}
+		return 0;
 	}
 
 	static inline int getWriteIDNode(WriteID ID)
