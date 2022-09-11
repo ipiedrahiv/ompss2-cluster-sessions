@@ -152,6 +152,10 @@ namespace TaskOffloading {
 		SatisfiabilityInfoMap &satInfoMap,
 		DataSendRegionInfoMap &regionInfoMap
 	) {
+		if (!ClusterManager::getGroupMessagesEnabled()) {
+			assert(satInfoMap.empty());
+		}
+
 		if (satInfoMap.empty() && regionInfoMap.empty()) {
 			return;
 		}
@@ -162,7 +166,6 @@ namespace TaskOffloading {
 			MessageSatisfiability *msg = new MessageSatisfiability(it.second);
 			ClusterManager::sendMessage(msg, it.first);
 		}
-
 		satInfoMap.clear();
 
 		for (auto &it: regionInfoMap) {
@@ -170,7 +173,6 @@ namespace TaskOffloading {
 			MessageDataSend *msg = new MessageDataSend(it.second.size(), it.second);
 			ClusterManager::sendMessage(msg, it.first);
 		}
-
 		regionInfoMap.clear();
 	}
 

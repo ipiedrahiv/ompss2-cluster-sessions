@@ -1116,6 +1116,12 @@ namespace DataAccessRegistration {
 				// The accesses will be released latter.
 				assert(access->getObjectType() == access_type || access->getObjectType() == top_level_sink_type);
 				access->getOriginator()->getDataReleaseStep()->addToReleaseList(access);
+
+				if (!ClusterManager::getGroupMessagesEnabled()) {
+					// When not grouping send the messages now, always set the argument to false
+					// because otherwise the step is deleted.
+					access->getOriginator()->getDataReleaseStep()->releasePendingAccesses(false);
+				}
 			}
 
 			if (access->getType() == COMMUTATIVE_ACCESS_TYPE) {
@@ -1175,7 +1181,10 @@ namespace DataAccessRegistration {
 			 * satisfiability.
 			 */
 			if (linksRead || linksWrite) {
-				step->linkRegion(access, linksRead, linksWrite, hpDependencyData._satisfiabilityMap, hpDependencyData._dataSendRegionInfoMap);
+				step->linkRegion(
+					access, linksRead, linksWrite,
+					hpDependencyData._satisfiabilityMap,
+					hpDependencyData._dataSendRegionInfoMap);
 			}
 
 			if (updatedStatus._triggersDataLinkRead && updatedStatus._triggersDataLinkWrite) {
@@ -2444,7 +2453,9 @@ namespace DataAccessRegistration {
 		assert(hpDependencyData._satisfiedOriginators.empty());
 
 #ifdef USE_CLUSTER
-		TaskOffloading::sendSatisfiabilityAndDataSends(hpDependencyData._satisfiabilityMap, hpDependencyData._dataSendRegionInfoMap);
+		TaskOffloading::sendSatisfiabilityAndDataSends(
+			hpDependencyData._satisfiabilityMap, hpDependencyData._dataSendRegionInfoMap
+		);
 #endif // USE_CLUSTER
 
 		handleRemovableTasks(hpDependencyData._removableTasks);

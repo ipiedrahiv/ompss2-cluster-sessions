@@ -92,6 +92,8 @@ private:
 
 	int _numMessageHandlerWorkers;
 
+	bool _groupMessages;
+
 	//! private constructors. This is a singleton.
 	ClusterManager();
 
@@ -654,6 +656,12 @@ public:
 	{
 		assert(_singleton);
 		return _singleton->_totalReadyTasks;
+	}
+
+	static bool getGroupMessagesEnabled()
+	{
+		assert(_singleton != nullptr);
+		return _singleton->_groupMessages;
 	}
 
 	static int nanos6Resize(int delta, nanos6_spawn_policy_t policy);

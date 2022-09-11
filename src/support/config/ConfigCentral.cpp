@@ -28,6 +28,7 @@ ConfigCentral::ConfigCentral() :
 	registerOption<bool_t>("cluster.disable_autowait", false);
 	registerOption<integer_t>("cluster.num_message_handler_workers", 2);
 	registerOption<integer_t>("cluster.num_max_nodes", 0);
+	registerOption<bool_t>("cluster.group_messages", true);
 
 	registerOption<string_t>("cluster.default_spawn_policy", "host");
 	registerOption<string_t>("cluster.default_shrink_transfer_policy", "lazy");

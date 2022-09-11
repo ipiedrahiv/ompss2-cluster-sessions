@@ -136,6 +136,9 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 	ConfigVariable<size_t> numMaxNodes("cluster.num_max_nodes");
 	_numMaxNodes = (numMaxNodes.getValue() > clusterSize ? numMaxNodes.getValue() : clusterSize);
 
+	ConfigVariable<bool> groupMessages("cluster.group_messages");
+	_groupMessages = groupMessages.getValue();
+
 	MessageId::initialize(internalRank, _numMaxNodes);
 	WriteIDManager::initialize(internalRank, _numMaxNodes);
 	OffloadedTaskIdManager::initialize(internalRank, _numMaxNodes);
@@ -462,6 +465,7 @@ int ClusterManager::nanos6GetInfo(nanos6_cluster_info_t *info)
 	info->eager_send = ClusterManager::getEagerSend();
 	info->merge_release_and_finish = ClusterManager::getMergeReleaseAndFinish();
 	info->reserved_leader_thread = CPUManager::hasReservedCPUforLeaderThread();
+	info->group_messages_enabled = ClusterManager::getGroupMessagesEnabled();
 
 	info->virtual_region_start = _singleton->_dataInit._virtualAllocation.getStartAddress();
 	info->virtual_region_size = _singleton->_dataInit._virtualAllocation.getSize();

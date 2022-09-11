@@ -72,6 +72,7 @@ typedef struct nanos6_cluster_info {
 	int eager_send;
 	int merge_release_and_finish;
 	int reserved_leader_thread;
+	int group_messages_enabled;
 
 	void *virtual_region_start;
 	unsigned long virtual_region_size;

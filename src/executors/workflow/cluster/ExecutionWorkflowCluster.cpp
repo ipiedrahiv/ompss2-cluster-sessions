@@ -21,6 +21,8 @@
 #include "LiveDataTransfers.hpp"
 
 #include <cluster/messages/MessageId.hpp>
+#include <cluster/messages/MessageSatisfiability.hpp>
+
 
 namespace ExecutionWorkflow {
 
@@ -110,14 +112,22 @@ namespace ExecutionWorkflow {
 				}
 			}
 
-			OffloadedTaskIdManager::OffloadedTaskId offloadedTaskId = _task->getOffloadedTaskId();
-			satisfiabilityMap[destNode].push_back(
-				TaskOffloading::SatisfiabilityInfo(
-					region, locationIndex,
-					read, write,
-					access->isWeak(), access->getType(),
-					writeID, offloadedTaskId, eagerSendTag)
+			// Create the satinfo
+			TaskOffloading::SatisfiabilityInfo satInfo(
+				region, locationIndex,
+				read, write,
+				access->isWeak(), access->getType(),
+				writeID, _task->getOffloadedTaskId(), eagerSendTag
 			);
+
+			if (ClusterManager::getGroupMessagesEnabled()) {
+				// Group the messages to send latter
+				satisfiabilityMap[destNode].push_back(satInfo);
+			} else {
+				TaskOffloading::SatisfiabilityInfoVector satInfoVec(1, satInfo);
+				MessageSatisfiability *msg = new MessageSatisfiability(satInfoVec);
+				ClusterManager::sendMessage(msg, destNode);
+			}
 
 			size_t linkedBytes = region.getSize();
 

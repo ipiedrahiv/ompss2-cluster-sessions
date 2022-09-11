@@ -326,6 +326,9 @@ __require_CLUSTER
 	eager_weak_fetch = true
 	# Enable eager send of all dependencies. Default is false
 	eager_send = false
+	# Group the satisfiability and release messages when possible.
+	# This should be always enabled.
+	group_messages = true
 	# Merge release and Finish messages when possible. Default
 	# true.  When this is true dataacesses release messages for
 	# different tasks can be merged and finalization into a single
