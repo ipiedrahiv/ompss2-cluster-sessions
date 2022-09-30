@@ -457,7 +457,7 @@ int ClusterManager::nanos6GetInfo(nanos6_cluster_info_t *info)
 	info->malleability_enabled = _singleton->_dataInit.clusterMalleabilityEnabled();
 
 	info->cluster_num_nodes = (unsigned long) ClusterManager::clusterSize();
-	info->numMessageHandlerWorkers = ClusterManager::getNumMessageHandlerWorkers();
+	info->num_message_handler_workers = ClusterManager::getNumMessageHandlerWorkers();
 	info->namespace_enabled = !ClusterManager::getDisableRemote();
 	info->disable_remote_connect = ClusterManager::getDisableRemoteConnect();
 	info->disable_autowait = ClusterManager::getDisableAutowait();

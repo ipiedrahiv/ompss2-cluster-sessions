@@ -64,7 +64,7 @@ typedef struct nanos6_cluster_info {
 	unsigned long cluster_num_nodes;
 	int malleability_enabled;
 
-	int numMessageHandlerWorkers;
+	int num_message_handler_workers;
 	int namespace_enabled;
 	int disable_remote_connect;
 	int disable_autowait;
