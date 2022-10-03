@@ -30,6 +30,38 @@
 
 Serialize *Serialize::_singleton = nullptr;
 
+// Weak tasks part
+nanos6_task_invocation_info_t Serialize::weakInvocationInfo = { "(De)Serialization weak code." };
+nanos6_task_invocation_info_t Serialize::fetchInvocationInfo = { "(De)Serialization fetch code." };
+nanos6_task_invocation_info_t Serialize::ioInvocationInfo = { "(De)Serialization strong code." };
+
+// Strong tasks part
+nanos6_task_implementation_info_t Serialize::implementationsSerialize = {
+	.device_type_id = nanos6_host_device,
+	.run = Serialize::serialize,
+	.get_constraints = Serialize::getConstraints,
+	.task_label = "(De)Serialize",
+	.declaration_source = 0,
+	.run_wrapper = 0
+};
+
+nanos6_task_info_t Serialize::infoVarSerialize =
+{
+	.num_symbols = 1,                                      // WTF is this??
+	.register_depinfo = Serialize::registerDependencies,
+	.onready_action = 0,
+	.get_priority = 0,
+	.implementation_count = 1,
+	.implementations = (nanos6_task_implementation_info_t*) &Serialize::implementationsSerialize,
+	.destroy_args_block = 0,
+	.duplicate_args_block = 0,
+	.reduction_initializers = 0,
+	.reduction_combiners = 0,
+	.task_type_data = 0
+};
+
+//============= Functions ===================================
+
 Serialize::Serialize(int clusterMaxSize) : _nSentinels(clusterMaxSize)
 {
 	assert(_nSentinels > 0);
@@ -46,12 +78,36 @@ Serialize::~Serialize()
 	ClusterMemoryManagement::lfree((void *) _sentinels, _nSentinels);
 }
 
+void Serialize::createAndSubmitStrong(
+	Task *parent,
+	nanos6_task_invocation_info_t* invocationInfo,
+	const SerializeArgs *const serializeArgs,
+	void *sentinel
+) {
+	assert(parent != nullptr);
+	assert(serializeArgs != nullptr);
 
-void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t *)
+	Task *task = AddTask::createTask(
+		(nanos6_task_info_t*) &Serialize::infoVarSerialize,
+		invocationInfo, // Task Invocation Info.
+		nullptr,
+		sizeof(SerializeArgs) + serializeArgs->_numRegions * sizeof(DataAccessRegion),
+		0,                                        // flags
+		serializeArgs->_numRegions,               // number of dependencies
+		false                                     // from user code
+	);
+	assert(task != nullptr);
+
+	SerializeArgs *args = reinterpret_cast<SerializeArgs *>(task->getArgsBlock());
+	assert(args != nullptr);
+
+	new (args) SerializeArgs(task, serializeArgs, sentinel);
+
+	AddTask::submitTask(task, parent, false);
+}
+
+void Serialize::ioData(const SerializeArgs * const serializeArgs)
 {
-	assert(arg != nullptr);
-
-	const SerializeArgs *const serializeArgs = reinterpret_cast<SerializeArgs *const>(arg);
 	assert(serializeArgs != nullptr);
 	assert(serializeArgs->_nodeIdx == ClusterManager::getCurrentClusterNode()->getCommIndex());
 
@@ -130,6 +186,43 @@ void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t 
 	MPIErrorHandler::handle(rc, intracom, "from MPI_File_close");
 }
 
+void Serialize::serialize(void *arg, void *, nanos6_address_translation_entry_t *)
+{
+	assert(arg != nullptr);
+
+	const SerializeArgs *const serializeArgs = reinterpret_cast<SerializeArgs *const>(arg);
+	assert(serializeArgs != nullptr);
+	assert(serializeArgs->_nodeIdx == ClusterManager::getCurrentClusterNode()->getCommIndex());
+
+	if (serializeArgs->_isWeak) {
+		WorkerThread *workerThread = WorkerThread::getCurrentWorkerThread();
+		assert(workerThread != nullptr);
+
+		Task *parent = workerThread->getTask();
+		assert(parent != nullptr);
+
+		// Weak task only create strong tasks: fetch and io task
+		if (serializeArgs->_isSerialize) {
+			// If it is a serialize, then create the fetch task to advance coping the data to this
+			// node when needed. The fetch task is exactly like the io one, but without sentinel and
+			// empty body, on de-serialization the fetch is not needed.
+			createAndSubmitStrong(parent, &Serialize::fetchInvocationInfo, serializeArgs, nullptr);
+		}
+
+		createAndSubmitStrong(
+			parent,
+			&Serialize::ioInvocationInfo,
+			serializeArgs,
+			serializeArgs->_sentinelRegion.getStartAddress()
+		);
+	} else if (serializeArgs->_sentinelRegion.getStartAddress() != nullptr) {
+		//Strong tasks are the one which make the io if have sentinel
+		Serialize::ioData(serializeArgs);
+	} else {
+		// Do nothing, this is what happen when the task is strong without sentinel (Fetch task)
+	}
+}
+
 void Serialize::registerDependencies(void *arg, void *, void *)
 {
 	assert(arg != nullptr);
@@ -139,25 +232,27 @@ void Serialize::registerDependencies(void *arg, void *, void *)
 	const DataAccessType accessType
 		= serializeArgs->_isSerialize ? READ_ACCESS_TYPE : WRITE_ACCESS_TYPE;
 
-	// Register the sentinel, required because only one MPI_File_Open can be called at the time.
-	// MPI is so dumb that it can break just cross opening files (specially for reading).
-	DataAccessRegistration::registerTaskDataAccess(
-		serializeArgs->_task,
-		READWRITE_ACCESS_TYPE,
-		false,                          // weak
-		serializeArgs->_sentinelRegion, // region
-		0,                              // Symbol index... not sure
-		no_reduction_type_and_operator,
-		no_reduction_index
-	);
+	if (serializeArgs->_sentinelRegion.getStartAddress() != nullptr) {
+		// Register the sentinel, required because only one MPI_File_Open can be called at the time.
+		// MPI is so dumb that it can break just cross opening files (specially for reading).
+		DataAccessRegistration::registerTaskDataAccess(
+			serializeArgs->_task,
+			READWRITE_ACCESS_TYPE,
+			serializeArgs->_isWeak,                 // weak
+			serializeArgs->_sentinelRegion,         // region
+			0,                                      // Symbol index... not sure
+			no_reduction_type_and_operator,
+			no_reduction_index
+		);
+	}
 
 	for (size_t i = 0; i < serializeArgs->_numRegions; ++i) {
 		DataAccessRegistration::registerTaskDataAccess(
 			serializeArgs->_task,
 			accessType,
-			false,                          // weak
-			serializeArgs->_regionsDeps[i],            // region
-			0,                              // Symbol index... not sure
+			serializeArgs->_isWeak,             // weak
+			serializeArgs->_regionsDeps[i],     // region
+			0,                                  // Symbol index... not sure
 			no_reduction_type_and_operator,
 			no_reduction_index
 		);
@@ -173,32 +268,6 @@ void Serialize::getConstraints(void* arg, nanos6_task_constraints_t *const const
 	constraints->node = serializeArgs->_nodeIdx;
 	constraints->stream = 0;
 }
-
-nanos6_task_invocation_info_t Serialize::invocationInfo = { "(De)Serialization code." };
-
-nanos6_task_implementation_info_t Serialize::implementationsSerialize = {
-	.device_type_id = nanos6_host_device,
-	.run = Serialize::serialize,
-	.get_constraints = Serialize::getConstraints,
-	.task_label = "(De)Serialize",
-	.declaration_source = 0,
-	.run_wrapper = 0
-};
-
-nanos6_task_info_t Serialize::infoVarSerialize =
-{
-	.num_symbols = 1,                                      // WTF is this??
-	.register_depinfo = Serialize::registerDependencies,
-	.onready_action = 0,
-	.get_priority = 0,
-	.implementation_count = 1,
-	.implementations = (nanos6_task_implementation_info_t*) &Serialize::implementationsSerialize,
-	.destroy_args_block = 0,
-	.duplicate_args_block = 0,
-	.reduction_initializers = 0,
-	.reduction_combiners = 0,
-	.task_type_data = 0
-};
 
 // Get a vector with sets for all the regions and their homeNode
 std::vector<Serialize::regionSet> Serialize::getHomeRegions(const DataAccessRegion &region)
@@ -307,7 +376,7 @@ int Serialize::serializeRegion(
 
 		Task *task = AddTask::createTask(
 			(nanos6_task_info_t*) &Serialize::infoVarSerialize,
-			(nanos6_task_invocation_info_t*) &Serialize::invocationInfo, // Task Invocation Info...
+			(nanos6_task_invocation_info_t*) &Serialize::weakInvocationInfo, // Task Invocation Info...
 			nullptr,
 			sizeof(SerializeArgs) + nRegions * sizeof(DataAccessRegion),
 			0,                                        // flags
