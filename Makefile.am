@@ -465,7 +465,6 @@ cluster_sources =
 if USE_CLUSTER
 cluster_sources += \
 	src/cluster/ClusterManager.cpp \
-	src/cluster/ClusterManagerResizeFunctions.cpp \
 	src/cluster/Serialize.cpp \
 	src/cluster/NodeNamespace.cpp \
 	src/cluster/ClusterMemoryManagement.cpp \
@@ -490,6 +489,10 @@ cluster_sources += \
 	src/scheduling/schedulers/cluster/ClusterHomeScheduler.cpp \
 	src/scheduling/schedulers/cluster/ClusterBalanceScheduler.cpp \
 	src/scheduling/schedulers/cluster/ClusterRandomScheduler.cpp
+
+if HAVE_SLURM
+cluster_sources += src/cluster/ClusterManagerResizeFunctions.cpp
+endif
 
 cluster_cppflags = \
 	-I$(srcdir)/src/cluster \

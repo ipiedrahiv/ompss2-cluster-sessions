@@ -41,7 +41,7 @@ AC_DEFUN([AC_CHECK_LIBSLURM],
 			CPPFLAGS="${CPPFLAGS} ${libslurm_CPPFLAGS}"
 			LIBS="${LIBS} ${libslurm_LIBS}"
 
-			AC_CHECK_HEADERS([slurm/slurm.h],[],
+			AC_CHECK_HEADER([slurm/slurm.h],[],
 				[
 					if test x"${ac_use_libslurm_prefix}" != x"" ; then
 						AC_MSG_ERROR([SLURM header cannot be found.])
@@ -53,7 +53,6 @@ AC_DEFUN([AC_CHECK_LIBSLURM],
 			AC_CHECK_LIB([slurm],
 				[slurm_hostlist_create],
 				[
-					AC_DEFINE(HAVE_SLURM, [1], [SLURM API is available])
 					ac_use_libslurm=yes
 				],[
 					if test x"${ac_use_libslurm_prefix}" != x"" ; then
@@ -71,9 +70,16 @@ AC_DEFUN([AC_CHECK_LIBSLURM],
 			LIBS="${ac_save_LIBS}"
 		fi
 
-		AM_CONDITIONAL(HAVE_SLURM, test x"${ac_use_libslurm}" = x"yes")
+
+		if test "x${ac_use_libslurm}" = xyes; then
+			AC_MSG_NOTICE([Slurm module flags: ${libslurm_CPPFLAGS}])
+			AC_MSG_NOTICE([Slurm module found: ${libslurm_LIBS}])
+			AC_DEFINE(HAVE_SLURM, [1], [SLURM API is available])
+		fi
 
 		AC_SUBST([libslurm_CPPFLAGS])
 		AC_SUBST([libslurm_LIBS])
+
+		AM_CONDITIONAL([HAVE_SLURM], [test "x${ac_use_libslurm}" = xyes])
 	]
 )

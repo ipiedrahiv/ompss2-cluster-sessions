@@ -11,7 +11,6 @@
 #include "ClusterMemoryManagement.hpp"
 #include "messages/MessageSysFinish.hpp"
 #include "messages/MessageDataFetch.hpp"
-#include "messages/MessageResizeImplementation.hpp"
 #include "messages/MessageDmalloc.hpp"
 
 #include "messenger/Messenger.hpp"
@@ -34,10 +33,9 @@
 
 #include "executors/threads/CPUManager.hpp"
 
-#if HAVE_SLURM
+#ifdef HAVE_SLURM
 #include "SlurmAPI.hpp"
-SlurmAPI *SlurmAPI::_singleton = nullptr;
-#endif // HAVE_SLURM
+#endif
 
 TaskOffloading::RemoteTasksInfoMap *TaskOffloading::RemoteTasksInfoMap::_singleton = nullptr;
 TaskOffloading::OffloadedTasksInfoMap *TaskOffloading::OffloadedTasksInfoMap::_singleton = nullptr;
@@ -184,122 +182,25 @@ void ClusterManager::initialize(int argc, char **argv)
 
 	RuntimeInfo::addEntry("cluster_communication", "Cluster Communication Implementation", commType);
 
-	/** If a communicator has not been specified through the
-	 * cluster.communication config variable we will not
-	 * initialize the cluster support of Nanos6 */
-	if (commType.getValue() != "disabled") {
+	if (commType.getValue() == "disabled") {
+		_singleton = new ClusterManager();
+		assert(_singleton != nullptr);
+	} else {
+		/** If a communicator has not been specified through the cluster.communication config
+		 * variable we will not initialize the cluster support of Nanos6 */
 		assert(argc > 0);
 		assert(argv != nullptr);
 		_singleton = new ClusterManager(commType.getValue(), argc, argv);
 		assert(_singleton != nullptr);
 
 #if HAVE_SLURM
-		char hostname[HOST_NAME_MAX];
-		FatalErrorHandler::failIf(
-			gethostname(hostname, HOST_NAME_MAX) != 0, "Couldn't get hostname."
-		);
-
-		// First of all get the init data.
-		if (!ClusterManager::isSpawned()) {
-			// Processes in the initial world get _dataInit from the environment
-			_singleton->_dataInit._numMinNodes = ClusterManager::clusterSize();
-			_singleton->_dataInit._numMaxNodes = ClusterManager::clusterMaxSize();
-
-			// At this moment we will receive the hostnames as there is no simple way to get this
-			// info from the slurm api. We can use this information at some point to deduce the
-			// distribution polity
-			if (_singleton->_dataInit.clusterMalleabilityEnabled()) {
-
-				// Set the spawn default policy used with simpler api.
-				ConfigVariable<std::string> defaultSpawnPolicy("cluster.default_spawn_policy");
-				std::string policyValue = defaultSpawnPolicy.getValue();
-				if (policyValue == "group") {
-					_singleton->_dataInit.defaultSpawnPolicy = nanos6_spawn_by_group;
-				} else if (policyValue == "host") {
-					_singleton->_dataInit.defaultSpawnPolicy = nanos6_spawn_by_host;
-				} else if (policyValue == "single") {
-					_singleton->_dataInit.defaultSpawnPolicy = nanos6_spawn_by_one;
-				} else {
-					FatalErrorHandler::warn(
-						"cluster.default_spawn_policy value:", policyValue, " is unknown, using: host"
-					);
-					_singleton->_dataInit.defaultSpawnPolicy = nanos6_spawn_by_host;
-				}
-
-				// Set the shrink data transfer policy.
-				ConfigVariable<std::string> defaultShrinkTransferPolicy("cluster.default_shrink_transfer_policy");
-				policyValue = defaultShrinkTransferPolicy.getValue();
-				if (policyValue == "lazy") {
-					_singleton->_dataInit.defaultShrinkTransferPolicy = nanos6_spawn_lazy;
-				} else if (policyValue == "eager") {
-					_singleton->_dataInit.defaultShrinkTransferPolicy = nanos6_spawn_eager;
-				} else {
-					FatalErrorHandler::warn(
-						"cluster.default_shrink_transfer_policy value:", policyValue, " is unknown, using: lazy"
-					);
-					_singleton->_dataInit.defaultShrinkTransferPolicy = nanos6_spawn_lazy;
-				}
-
-				// TODO: if sometime we implement a collective operation, this may be implemented
-				// with a gather
-				ClusterNode *currentNode = ClusterManager::getCurrentClusterNode();
-
-				if (ClusterManager::isMasterNode()) {
-					// Master will receve the hostnames from all the processes
-					for (ClusterNode *it: ClusterManager::getClusterNodes()) {
-						char tmp[HOST_NAME_MAX];
-						if (it != currentNode) {
-							DataAccessRegion region(tmp, HOST_NAME_MAX * sizeof(char));
-							ClusterManager::fetchDataRaw(
-								region, it->getMemoryNode(), it->getIndex(), true, false
-							);
-							it->setHostName(tmp);
-						} else {
-							it->setHostName(hostname);
-						}
-					}
-
-					SlurmAPI::initialize();
-
-				} else {
-					// Share my hostname with master if I am in the initial world.
-					DataAccessRegion region(hostname, HOST_NAME_MAX * sizeof(char));
-					ClusterManager::sendDataRaw(
-						region,
-						ClusterManager::getMasterNode()->getMemoryNode(),
-						currentNode->getIndex(),
-						true, false
-					);
-				}
-			}
-
-		} else {
-			// Spawned processes wait for the _dataInit from master. It doesn't sent any hostinfo
-			// because master should already know at the spawn moment (else, this is not the moment
-			// to get it... too late and the decision is made)
-			assert(!ClusterManager::isMasterNode());
-
-			DataAccessRegion region(&_singleton->_dataInit, sizeof(DataInitSpawn));
-
-			const ClusterMemoryNode *master = ClusterManager::getMasterNode()->getMemoryNode();
-			ClusterManager::fetchDataRaw(
-				region, master, std::numeric_limits<int>::max(), true, false
-			);
-
-			assert(_singleton->_dataInit.clusterMalleabilityEnabled());
-		}
-
-	} else {
-		_singleton = new ClusterManager();
-		assert(_singleton != nullptr);
-	}
-
+		_singleton->initializeMalleabilityVars();
 #else // HAVE_SLURM
-	FatalErrorHandler::failIf(
-		ClusterManager::isSpawned(), "Can spawn process without malleability support."
-	);
+		FatalErrorHandler::failIf(
+			ClusterManager::isSpawned(), "Can spawn process without malleability support."
+		);
 #endif // HAVE_SLURM
-
+	}
 }
 
 // This needs to be called AFTER initializing the memory allocator

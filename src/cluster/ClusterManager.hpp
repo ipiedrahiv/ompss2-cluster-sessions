@@ -101,15 +101,6 @@ private:
 
 	~ClusterManager();
 
-
-	// Spawn all processes at once; rely on slurm srun policy.. Use this policy only for profiling
-	// purposes.
-	int resizeFull(int delta, size_t nEntries, const MessageSpawnHostInfo *entries);
-	int resizeByPolicy(
-		nanos6_spawn_policy_t policy,
-		int delta, size_t nEntries, const MessageSpawnHostInfo *entries
-	);
-
 public:
 
 	static HackReport &getReport()
@@ -117,13 +108,6 @@ public:
 		assert(_singleton != nullptr);
 		return _singleton->_report;
 	}
-
-	//! \brief Spawn new processes.
-	//!
-	//! \param[in] Number of desired new nodes
-	//! \returns On success returns delta.
-	static int handleResizeMessage(const MessageSpawn *msgSpawn);
-	static int handleResizeMessage(const MessageShrink *msgShrink);
 
 	//! \brief Initialize the ClusterManager
 	//! This is called before initializing the memory allocator because it collects some
@@ -664,9 +648,29 @@ public:
 		return _singleton->_groupMessages;
 	}
 
-	static int nanos6Resize(int delta, nanos6_spawn_policy_t policy);
-
 	static int nanos6GetInfo(nanos6_cluster_info_t *info);
+
+#if HAVE_SLURM
+	void initializeMalleabilityVars();
+
+	// Spawn all processes at once; rely on slurm srun policy.. Use this policy only for profiling
+	// purposes.
+	int resizeFull(int delta, size_t nEntries, const MessageSpawnHostInfo *entries);
+	int resizeByPolicy(
+		nanos6_spawn_policy_t policy,
+		int delta, size_t nEntries, const MessageSpawnHostInfo *entries
+	);
+
+	//! \brief Spawn new processes.
+	//!
+	//! \param[in] Number of desired new nodes
+	//! \returns On success returns delta.
+	static int handleResizeMessage(const MessageSpawn *msgSpawn);
+	static int handleResizeMessage(const MessageShrink *msgShrink);
+
+	static int nanos6Resize(int delta, nanos6_spawn_policy_t policy);
+#endif // HAVE_SLURM
+
 };
 
 

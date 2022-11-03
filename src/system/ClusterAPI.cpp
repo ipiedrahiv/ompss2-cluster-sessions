@@ -106,14 +106,19 @@ extern "C" {
 		task->setEarlyRelease(early_release);
 	}
 
-	int nanos6_cluster_resize(int delta)
-	{
-		return ClusterManager::nanos6Resize(delta, nanos6_spawn_default);
-	}
-
 	int nanos6_cluster_resize_with_policy(int delta, nanos6_spawn_policy_t policy)
 	{
+#if HAVE_SLURM
 		return ClusterManager::nanos6Resize(delta, policy);
+#else
+		FatalErrorHandler::warn("Nanos6 is compiled without malleability support, ignore resize");
+		return ClusterManager::clusterSize();
+#endif
+	}
+
+	int nanos6_cluster_resize(int delta)
+	{
+		return nanos6_cluster_resize_with_policy(delta, nanos6_spawn_default);
 	}
 
 
