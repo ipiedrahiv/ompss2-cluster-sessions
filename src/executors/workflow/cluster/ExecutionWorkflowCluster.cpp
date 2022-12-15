@@ -170,7 +170,7 @@ namespace ExecutionWorkflow {
 		bool deleteStep = false;
 		{
 			// Get a lock (see comment in ClusterDataLinkStep::linkRegion).
-			std::lock_guard<SpinLock> guard(_lock);
+			_lock.lock();
 			assert(_targetMemoryPlace != nullptr);
 
 			int location = -1;
@@ -224,21 +224,24 @@ namespace ExecutionWorkflow {
 			);
 
 			const size_t linkedBytes = _region.getSize();
+
+			_lock.unlock();
+			releaseSuccessors();
+			_lock.lock();
+
 			//! If at the moment of offloading the access is not both
 			//! read and write satisfied, then the info will be linked
 			//! later on. In this case, we just account for the bytes that
 			//! we link now, the Step will be deleted when all the bytes
 			//! are linked through linkRegion method invocation
+			//! Do it with the lock taken to avoid race conditions.
 			if (_read && _write) {
 				deleteStep = true;
 			} else {
 				_bytesToLink -= linkedBytes;
 				_started = true;
 			}
-
-			// Release successors before releasing the lock (otherwise
-			// ClusterDataLinkStep::linkRegion may delete this step first).
-			releaseSuccessors();
+			_lock.unlock();
 		}
 
 		if (deleteStep) {
