@@ -18,6 +18,7 @@
 #include <hardware/HardwareInfo.hpp>
 
 
+// Set up the reduction information
 ReductionInfo::ReductionInfo(DataAccessRegion region, reduction_type_and_operator_index_t typeAndOperatorIndex,
 		std::function<void(void*, void*, size_t)> initializationFunction, std::function<void(void*, void*, size_t)> combinationFunction) :
 	_region(region),
@@ -64,14 +65,21 @@ ReductionInfo::~ReductionInfo()
 	}
 }
 
+// This value encodes the type, e.g. RED_TYPE_INT, and the operator, e.g. RD_OP_ADDITION.
+// These are defined in nanos6/reductions.h.
 reduction_type_and_operator_index_t ReductionInfo::getTypeAndOperatorIndex() const {
 	return _typeAndOperatorIndex;
 }
 
+// The original region for a reduction (it might get fragmented later).
 const DataAccessRegion& ReductionInfo::getOriginalRegion() const {
 	return _region;
 }
 
+// Allocate a free slot (private copy of the variable) to be running by tasks
+// executing on a particular core. If the core has already participated in the
+// reduction, then return the same slot that was used previously, so it can
+// continue working in the same private copy of the variable.
 size_t ReductionInfo::getFreeSlotIndex(size_t virtualCpuId) {
 	__attribute__((unused)) const long nCpus = CPUManager::getTotalCPUs();
 	assert(nCpus > 0);
@@ -113,6 +121,8 @@ size_t ReductionInfo::getFreeSlotIndex(size_t virtualCpuId) {
 	return freeSlotIndex;
 }
 
+// Get the address of the private copy of the variable in a particular free slot.
+// Allocate this memory if not done already. Then return the full region (not fragmented).
 DataAccessRegion ReductionInfo::getFreeSlotStorage(size_t slotIndex) {
 #ifndef NDEBUG
 	_lock.lock();
@@ -162,6 +172,14 @@ namespace {
 	}
 };
 
+// A reduction can start working as soon as the initial value of the variable
+// is read satisfied. If the initial value is not yet write satisfied, some
+// earlier tasks may still be reading it, but it is OK to start the reduction
+// by working only in private copies of the variable. Once the variable becomes
+// write satisfied, the original storage region becomes available. This only
+// happens once because _originalStorageAvailabilityCounter is initialized to
+// the full region size, decremented by this function, made available when it
+// becomes zero, but never incremented again.
 void ReductionInfo::makeOriginalStorageRegionAvailable(const DataAccessRegion &region) {
 	_originalStorageAvailabilityCounter -= region.getSize();
 	
@@ -181,6 +199,14 @@ void ReductionInfo::makeOriginalStorageRegionAvailable(const DataAccessRegion &r
 	}
 }
 
+// Combine multiple reduction slots into one, applying the reduction operator
+// as necessary. This is done once at the end of the reduction, rather than
+// incrementally as tasks finish. Deferring the combination until the end means
+// that multiple tasks (that don't run concurrently) can reuse the same
+// already-initialized reduction slot.  If the original variable is already
+// write satisfied (indicated by canCombineToOriginalStorage being true), then
+// the result is written directly to the original variable. Otherwise keep it
+// in a private copy (known as an "aggregating slot").
 bool ReductionInfo::combineRegion(const DataAccessRegion& subregion, reduction_slot_set_t& accessedSlots, bool canCombineToOriginalStorage) {
 	assert(accessedSlots.size() > 0);
 	
@@ -302,6 +328,8 @@ bool ReductionInfo::combineRegion(const DataAccessRegion& subregion, reduction_s
 	return _originalStorageCombinationCounter == 0;
 }
 
+// Release an already-initialized slot so that it can be used by another task that is part
+// of the same reduction.
 void ReductionInfo::releaseSlotsInUse(size_t virtualCpuId) {
 	std::lock_guard<spinlock_t> guard(_lock);
 	

@@ -426,7 +426,7 @@ namespace DataAccessRegistration {
 				&& access->writeSatisfied();
 
 			_combinesReductionToPrivateStorage =
-				access->closesReduction()
+				access->closesReduction() // last access in a reduction
 				// If there are subaccesses, it's the last subaccess that should combine
 				&& !access->hasSubaccesses()
 				// Having received 'ReductionSlotSet' implies that previously inserted reduction accesses
@@ -438,7 +438,8 @@ namespace DataAccessRegistration {
 
 			_combinesReductionToOriginal =
 				_combinesReductionToPrivateStorage
-				// Being satisfied implies all predecessors (reduction or not) have been completed
+				// Being satisfied implies all predecessors (reduction or not) have been completed so
+				// the original storage location is available
 				&& _isSatisfied;
 
 			_triggersDataRelease = false;
@@ -812,6 +813,9 @@ namespace DataAccessRegistration {
 		}
 
 		// Notify reduction original storage has become available
+		// (reduction may have started, using private storage, as soon as the access
+		// was read satisfied, but now that it is also write satisfied, the reduction tasks
+		// can overwrite the original variable)
 		if (initialStatus._makesReductionOriginalStorageAvailable != updatedStatus._makesReductionOriginalStorageAvailable) {
 			assert(!initialStatus._makesReductionOriginalStorageAvailable);
 			assert(access->getObjectType() == access_type);
@@ -822,7 +826,8 @@ namespace DataAccessRegistration {
 			reductionInfo->makeOriginalStorageRegionAvailable(access->getAccessRegion());
 		}
 
-		// Reduction combination to a private reduction storage
+		// Reduction combination to a private reduction storage (original variable still
+		// not write satisfied)
 		if ((initialStatus._combinesReductionToPrivateStorage != updatedStatus._combinesReductionToPrivateStorage)
 			// If we can already combine to the original region directly, we just skip this step
 			&& (initialStatus._combinesReductionToOriginal == updatedStatus._combinesReductionToOriginal)) {
@@ -841,7 +846,8 @@ namespace DataAccessRegistration {
 			assert(!wasLastCombination);
 		}
 
-		// Reduction combination to original region
+		// Reduction combination to original region (because the original variable is
+		// already write satisfied)
 		if (initialStatus._combinesReductionToOriginal != updatedStatus._combinesReductionToOriginal) {
 			assert(!initialStatus._combinesReductionToOriginal);
 			assert(updatedStatus._combinesReductionToPrivateStorage);
@@ -960,6 +966,8 @@ namespace DataAccessRegistration {
 				updateOperation._makeCommutativeSatisfied = true;
 			}
 
+			// Pass the ReductionInfo, which gives the reduction type (e.g. int), operator (e.g. +),
+			// and bookkeeping structures for private copies of the value (slots).
 			if (initialStatus._propagatesReductionInfoToNext != updatedStatus._propagatesReductionInfoToNext) {
 				assert(!initialStatus._propagatesReductionInfoToNext);
 				assert((access->getType() != REDUCTION_ACCESS_TYPE) || (access->receivedReductionInfo() || access->allocatedReductionInfo()));
@@ -967,6 +975,8 @@ namespace DataAccessRegistration {
 				updateOperation._reductionInfo = access->getReductionInfo();
 			}
 
+			// All previous reduction tasks have completed: pass bitset saying which reduction
+			// slots (private copies) have partial results that need combining into the final value.
 			if (initialStatus._propagatesReductionSlotSetToNext != updatedStatus._propagatesReductionSlotSetToNext) {
 				assert(!initialStatus._propagatesReductionSlotSetToNext);
 
@@ -5954,6 +5964,13 @@ namespace DataAccessRegistration {
 		Instrument::exitHandleExitTaskwait();
 	}
 
+	// For each reduction access:
+	// (1) Get a free reduction slot, which will hold a private copy of the variable
+	//     to allow the reduction tasks to run concurrently (re-using the original
+	//     variable itself, if possible).
+	// (2) Set up the translation table, which will be passed to the task body. This
+	//     translates the original address of the variable into the address of the
+	//     private copy ("translation").
 	void translateReductionAddresses(
 		Task *task, ComputePlace *computePlace,
 		nanos6_address_translation_entry_t *translationTable,
