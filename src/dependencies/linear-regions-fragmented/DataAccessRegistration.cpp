@@ -4428,12 +4428,15 @@ namespace DataAccessRegistration {
 	{
 		DataAccessLink previous = bottomMapEntry->_link;
 		DataAccessType accessType = bottomMapEntry->_accessType;
-		assert(bottomMapEntry->_reductionTypeAndOperatorIndex == no_reduction_type_and_operator);
+		reduction_type_and_operator_index_t reductionTypeAndOperatorIndex =
+			bottomMapEntry->_reductionTypeAndOperatorIndex;
+
 		{
 			DataAccess *topLevelSinkFragment = createAccess(
 				task,
 				top_level_sink_type,
-				accessType, /* not weak */ false, region);
+				accessType, /* not weak */ false, region,
+				reductionTypeAndOperatorIndex);
 
 			// TODO, top level sink fragment, what to do with the symbols?
 
@@ -4487,15 +4490,6 @@ namespace DataAccessRegistration {
 			[&](DataAccess *previousAccess) -> bool
 			{
 				DataAccessStatusEffects initialStatus(previousAccess);
-				// Mark end of reduction
-				if (previousAccess->getType() == REDUCTION_ACCESS_TYPE) {
-					// When a reduction access is to be linked with a top-level sink, we want to mark the
-					// reduction access so that it is the last access of its reduction chain
-					//
-					// Note: This is different from the taskwait above in that a top-level sink will
-					// _always_ mean the reduction is to be closed
-					previousAccess->setClosesReduction();
-				}
 
 				/*
 				 * Link to the top-level sink and unset flag indicating that it was in bottom map.
