@@ -3252,7 +3252,8 @@ namespace DataAccessRegistration {
 				DataAccessStatusEffects initialStatus(previous);
 
 				// Mark end of reduction
-				if (previous->getType() == REDUCTION_ACCESS_TYPE) {
+				if (previous->getType() == REDUCTION_ACCESS_TYPE
+					&& !parent->isNodeNamespace()) {
 					if (dataAccess->getReductionTypeAndOperatorIndex() != previous->getReductionTypeAndOperatorIndex()) {
 						// When any access is to be linked with a non-matching reduction access,
 						// we want to mark the preceding reduction access so that it is the
@@ -3303,7 +3304,12 @@ namespace DataAccessRegistration {
 							canPropagateInNamespace = false;
 						} else if((dataAccess->getType() == AUTO_ACCESS_TYPE) || (previous->getType() == AUTO_ACCESS_TYPE)) {
 							canPropagateInNamespace = false;
+						} else if ((dataAccess->getType() == REDUCTION_ACCESS_TYPE) || (previous->getType() == REDUCTION_ACCESS_TYPE)) {
+							// TODO namespace propagation of reduction to the same reduction should be OK, but
+							// disable all namespace propagations involving reductions for now.
+							canPropagateInNamespace = false;
 						}
+
 						if (canPropagateInNamespace) {
 							Instrument::namespacePropagation(Instrument::NamespaceSuccessful, dataAccess->getAccessRegion());
 						} else {
@@ -3881,7 +3887,8 @@ namespace DataAccessRegistration {
 
 					if (isReleaseAccess && accessOrFragment->hasDataLinkStep()
 						&& accessOrFragment->getType() != COMMUTATIVE_ACCESS_TYPE
-						&& accessOrFragment->getType() != CONCURRENT_ACCESS_TYPE) {
+						&& accessOrFragment->getType() != CONCURRENT_ACCESS_TYPE
+						&& accessOrFragment->getType() != REDUCTION_ACCESS_TYPE) {
 						bool notSat = false;
 						if (!accessOrFragment->readSatisfied()) {
 							accessOrFragment->setReadSatisfied(location);
