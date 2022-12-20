@@ -425,7 +425,6 @@ namespace ExecutionWorkflow {
 
 
 		if (executionStep->ready()) {
-			workflow->enforceOrder(executionStep, notificationStep);
 			workflow->addRootStep(executionStep);
 		}
 
