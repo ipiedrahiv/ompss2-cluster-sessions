@@ -341,8 +341,8 @@ namespace TaskOffloading {
 				satInfo[i]._weak,
 				satInfo[i]._region,
 				0, /* TODO: send symbol list, ignored for the moment */
-				no_reduction_type_and_operator,
-				no_reduction_index,
+				satInfo[i]._reductionTypeAndOperatorIndex,
+				satInfo[i]._reductionIndex,
 				satInfo[i]._id);
 		}
 

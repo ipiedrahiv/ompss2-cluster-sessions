@@ -59,6 +59,10 @@ namespace ExecutionWorkflow {
 		//! type of the corresponding access 
 		DataAccessType _accessType;
 
+		// Information for reductions
+		reduction_type_and_operator_index_t _reductionTypeAndOperatorIndex;
+		reduction_index_t _reductionIndex;
+
 		OffloadedTaskIdManager::OffloadedTaskId _namespacePredecessor;
 		int _namespacePredecessorNode;
 		WriteID _writeID;
@@ -82,6 +86,8 @@ namespace ExecutionWorkflow {
 			_write(access->writeSatisfied()),
 			_weak(access->isWeak()),
 			_accessType(access->getType()),
+			_reductionTypeAndOperatorIndex(access->getReductionTypeAndOperatorIndex()),
+			_reductionIndex(access->getReductionIndex()),
 			_namespacePredecessor(OffloadedTaskIdManager::InvalidOffloadedTaskId),
 			_namespacePredecessorNode(VALID_NAMESPACE_UNKNOWN),
 			_writeID((access->getType() == COMMUTATIVE_ACCESS_TYPE) ? 0 : access->getWriteID()),
@@ -428,6 +434,8 @@ namespace ExecutionWorkflow {
 			WriteID writeID,
 			bool read, bool write,
 			bool weak, DataAccessType accessType,
+			reduction_type_and_operator_index_t reductionTypeAndOperatorIndex,
+			reduction_index_t reductionIndex,
 			OffloadedTaskIdManager::OffloadedTaskId namespacePredecessorId,
 			int eagerWeakSendTag
 		) {
@@ -441,6 +449,8 @@ namespace ExecutionWorkflow {
 					region, source,
 					read, write,
 					weak, accessType,
+					reductionTypeAndOperatorIndex,
+					reductionIndex,
 					writeID, namespacePredecessorId, eagerWeakSendTag)
 			);
 		}

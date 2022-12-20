@@ -117,6 +117,8 @@ namespace ExecutionWorkflow {
 				region, locationIndex,
 				read, write,
 				access->isWeak(), access->getType(),
+				access->getReductionTypeAndOperatorIndex(),
+				access->getReductionIndex(),
 				writeID, _task->getOffloadedTaskId(), eagerSendTag
 			);
 
@@ -219,6 +221,8 @@ namespace ExecutionWorkflow {
 				_writeID,
 				_read, _write,
 				_weak, _accessType,
+				_reductionTypeAndOperatorIndex,
+				_reductionIndex,
 				_namespacePredecessor,
 				eagerSendTag
 			);
