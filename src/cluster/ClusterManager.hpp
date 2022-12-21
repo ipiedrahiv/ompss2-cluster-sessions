@@ -434,8 +434,7 @@ public:
 	static inline bool isSpawned()
 	{
 		assert(_singleton != nullptr);
-		assert(_singleton->_msn != nullptr);
-		return _singleton->_msn->isSpawned();
+		return _singleton->_msn != nullptr && _singleton->_msn->isSpawned();
 	}
 
 	//! \brief Initiate a data fetch operation

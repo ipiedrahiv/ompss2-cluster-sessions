@@ -60,6 +60,9 @@ ClusterManager::ClusterManager()
 	MessageId::initialize(0, 1);
 	WriteIDManager::initialize(0,1);
 	OffloadedTaskIdManager::initialize(0,1);
+
+	_dataInit._numMinNodes = 1;
+	_dataInit._numMaxNodes = 1;
 }
 
 ClusterManager::ClusterManager(std::string const &commType, int argc, char **argv)

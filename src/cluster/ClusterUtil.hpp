@@ -55,8 +55,8 @@ inline void __cluster_assert_fail(
 // In the verbose instrumentation there is the logMessage, but functional only when verbose
 #define clusteFprintf(STREAM, FORMAT, ...)								\
 	fprintf(STREAM,  "# Node:%s " FORMAT,				     	 \
-			ClusterManager::getCurrentClusterNode()->getInstrumentationName().c_str(), \
-			##__VA_ARGS__)
+		ClusterManager::getCurrentClusterNode()->getInstrumentationName().c_str(), \
+		##__VA_ARGS__)
 
 // Print Node [Rest]
 #define clusterPrintf(FORMAT, ...) clusteFprintf(stdout, FORMAT, ##__VA_ARGS__)

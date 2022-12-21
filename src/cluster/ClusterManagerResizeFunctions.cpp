@@ -62,9 +62,11 @@ void ClusterManager::initializeMalleabilityVars()
 				_singleton->_dataInit.defaultSpawnPolicy = nanos6_spawn_by_one;
 			} else {
 				FatalErrorHandler::warn(
-					"cluster.default_spawn_policy value:", policyValue, " is unknown, using: host"
+					"cluster.default_spawn_policy value:",
+					policyValue,
+					" is unknown, using the default: ",
+					_singleton->_dataInit.defaultSpawnPolicy
 				);
-				_singleton->_dataInit.defaultSpawnPolicy = nanos6_spawn_by_host;
 			}
 
 			// Set the shrink data transfer policy.
@@ -76,9 +78,11 @@ void ClusterManager::initializeMalleabilityVars()
 				_singleton->_dataInit.defaultShrinkTransferPolicy = nanos6_spawn_eager;
 			} else {
 				FatalErrorHandler::warn(
-					"cluster.default_shrink_transfer_policy value:", policyValue, " is unknown, using: lazy"
+					"cluster.default_shrink_transfer_policy value:",
+					policyValue,
+					" is unknown, using the default: ",
+					_singleton->_dataInit.defaultShrinkTransferPolicy
 				);
-				_singleton->_dataInit.defaultShrinkTransferPolicy = nanos6_spawn_lazy;
 			}
 
 			// TODO: if sometime we implement a collective operation, this may be implemented
