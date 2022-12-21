@@ -157,4 +157,8 @@ extern "C" {
 		return ClusterManager::nanos6GetInfo(info);
 	}
 
+	int nanos6_in_cluster_mode(void)
+	{
+		return ClusterManager::inClusterMode();
+	}
 }
