@@ -235,6 +235,8 @@ namespace DataAccessRegistration {
 	void accessInfo(Task *task, DataAccessRegion region, CPUDependencyData &hpDependencyData, bool noEagerSend, bool isReadOnly);
 
 	bool supportsDataTracking();
+
+	DataAccessRegion getTranslatedRegion(Task *task, DataAccessRegion region);
 } // namespace DataAccessRegistration
 
 

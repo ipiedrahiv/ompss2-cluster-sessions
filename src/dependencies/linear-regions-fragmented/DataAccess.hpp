@@ -142,6 +142,9 @@ private:
 	int _validNamespaceSelf;
 	OffloadedTaskIdManager::OffloadedTaskId _namespacePredecessor;
 
+	//! Translation offset for reductions of offloaded accesses
+	std::ptrdiff_t _translationOffset;
+
 public:
 	DataAccess(
 		DataAccessObjectType objectType,
@@ -173,7 +176,8 @@ public:
 		_dataLinkStep(dataLinkStep),
 		_validNamespacePrevious(VALID_NAMESPACE_UNKNOWN),
 		_validNamespaceSelf(VALID_NAMESPACE_UNKNOWN),
-		_namespacePredecessor(OffloadedTaskIdManager::InvalidOffloadedTaskId)
+		_namespacePredecessor(OffloadedTaskIdManager::InvalidOffloadedTaskId),
+		_translationOffset(0)
 	{
 		assert(originator != nullptr);
 
@@ -205,7 +209,8 @@ public:
 		_dataLinkStep(other.getDataLinkStep()),
 		_validNamespacePrevious(other.getValidNamespacePrevious()),
 		_validNamespaceSelf(other.getValidNamespaceSelf()),
-		_namespacePredecessor(other.getNamespacePredecessor())
+		_namespacePredecessor(other.getNamespacePredecessor()),
+		_translationOffset(other._translationOffset)
 	{}
 
 	~DataAccess()
@@ -942,6 +947,18 @@ public:
 	void setConcurrentInitialLocation(const MemoryPlace *location)
 	{
 		_concurrentInitialLocation = location;
+	}
+
+	// Get and set the translation offset for offloaded reductions
+	void *getTranslatedStartAddress() const
+	{
+		 char *addr = (char*)getAccessRegion().getStartAddress() + _translationOffset;
+		 return (void *)addr;
+	}
+
+	void setTranslatedStartAddress(void *translatedAddr)
+	{
+		_translationOffset = (char *)translatedAddr - (char *)getAccessRegion().getStartAddress();
 	}
 
 

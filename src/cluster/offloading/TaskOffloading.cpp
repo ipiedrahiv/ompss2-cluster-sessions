@@ -35,6 +35,7 @@
 #include <LiveDataTransfers.hpp>
 #include "scheduling/Scheduler.hpp"
 #include "cluster/ClusterMetrics.hpp"
+#include "dependencies/SymbolTranslation.hpp"
 
 namespace TaskOffloading {
 
@@ -122,6 +123,18 @@ namespace TaskOffloading {
 
 		Instrument::taskIsOffloaded(task->getInstrumentationTaskId());
 		task->markAsOffloaded();
+
+		// Allocate private storage to receive reductions if needed
+		nanos6_address_translation_entry_t
+			stackTranslationTable[SymbolTranslation::MAX_STACK_SYMBOLS];
+		size_t tableSize = 0;
+		nanos6_address_translation_entry_t *translationTable =
+			SymbolTranslation::generateTranslationTable(
+				task, remoteNode, stackTranslationTable, tableSize);
+		// Free up all symbol translation
+		if (tableSize > 0) {
+			MemoryAllocator::free(translationTable, tableSize);
+		}
 
 		MessageTaskNew *msg = new MessageTaskNew(
 			taskInfo, taskInvocationInfo, flags,

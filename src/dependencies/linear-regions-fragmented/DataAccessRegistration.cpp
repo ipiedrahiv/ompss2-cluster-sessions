@@ -5971,6 +5971,25 @@ namespace DataAccessRegistration {
 		Instrument::exitHandleExitTaskwait();
 	}
 
+	DataAccessRegion getTranslatedRegion(
+		Task *task, DataAccessRegion region
+	) {
+		TaskDataAccesses &accessStructures = task->getDataAccesses();
+		std::lock_guard<TaskDataAccesses::spinlock_t> guard(accessStructures._lock);
+		void *addr = nullptr; // region.getStartAddress();
+		accessStructures._accesses.processIntersecting(
+			region,
+			[&](TaskDataAccesses::accesses_t::iterator position) -> bool {
+				DataAccess *dataAccess = &(*position);
+				assert(dataAccess != nullptr);
+				addr = dataAccess->getTranslatedStartAddress();
+				return false;
+			});
+		assert(addr != nullptr);
+		DataAccessRegion translatedRegion(addr, region.getSize());
+		return translatedRegion;
+	}
+
 	// For each reduction access:
 	// (1) Get a free reduction slot, which will hold a private copy of the variable
 	//     to allow the reduction tasks to run concurrently (re-using the original
