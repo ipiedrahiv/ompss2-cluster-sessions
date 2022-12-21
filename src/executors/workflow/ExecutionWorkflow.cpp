@@ -47,15 +47,6 @@ namespace ExecutionWorkflow {
 		Step *step;
 		Instrument::enterCreateDataCopyStep(isTaskwait);
 
-		/* At the moment we do not support data copies for accesses
-			* of the following types. This essentially mean that devices,
-			* e.g. Cluster, CUDA, do not support these accesses. */
-		if (access->getType() == REDUCTION_ACCESS_TYPE) {
-			step = new Step();
-			Instrument::exitCreateDataCopyStep(isTaskwait);
-			return step;
-		}
-
 		assert(targetMemoryPlace != nullptr);
 		assert(!targetMemoryPlace->isDirectoryMemoryPlace());
 
@@ -67,7 +58,7 @@ namespace ExecutionWorkflow {
 		// controlled by cluster.eager_weak_fetch) and the registration will be
 		// done when we receive MessageSatisfiability.
 		if (sourceMemoryPlace == nullptr) {
-			assert(access->isWeak());
+			assert(access->isWeak() || access->getType() == REDUCTION_ACCESS_TYPE);
 		}
 
 		// Take the source memory type, except nullptr and the current memory node both

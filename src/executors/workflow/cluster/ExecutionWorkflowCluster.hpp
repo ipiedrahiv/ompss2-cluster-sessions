@@ -115,6 +115,9 @@ namespace ExecutionWorkflow {
 					_write = true;
 					_read = true;
 				}
+			} else if (access->getType() == REDUCTION_ACCESS_TYPE) {
+				_read = true;
+				_write = true;
 			}
 
 			assert(targetMemoryPlace->getType() == nanos6_device_t::nanos6_cluster_device);

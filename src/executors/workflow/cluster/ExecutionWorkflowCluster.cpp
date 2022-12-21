@@ -175,10 +175,19 @@ namespace ExecutionWorkflow {
 			_lock.lock();
 			assert(_targetMemoryPlace != nullptr);
 
-			int location = -1;
-			if (_read || _write) {
+			int location;
+			if (_accessType == REDUCTION_ACCESS_TYPE) {
+				// Reduction access for an offloaded task always starts with the
+				// identity element. Indicate this using "-42" which means
+				// uninitialized memory.
+				location = -42;
+			} else if (_read || _write) {
+				// Read satisfied: use source memory place index
 				assert(_sourceMemoryPlace != nullptr);
 				location = _sourceMemoryPlace->getIndex();
+			} else {
+				// Not read satisfied: -1 means nullptr
+				location = -1;
 			}
 			Instrument::logMessage(
 					Instrument::ThreadInstrumentationContext::getCurrent(),

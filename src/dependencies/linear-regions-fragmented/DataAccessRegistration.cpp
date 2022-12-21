@@ -420,8 +420,13 @@ namespace DataAccessRegistration {
 				_propagatesReductionSlotSetToNext = false;
 			}
 
+			// The first task in the reduction makes the original storage location
+			// available (to all reduction tasks) as soon as it is write satisfied.
+			// Only do this on the original node to avoid having to initialize the
+			// original storage location.
 			_makesReductionOriginalStorageAvailable =
 				access->getObjectType() == access_type
+				&& (access->hasLocation() && access->getLocation()->isClusterLocalMemoryPlace())
 				&& access->allocatedReductionInfo()
 				&& access->writeSatisfied();
 
@@ -861,6 +866,8 @@ namespace DataAccessRegistration {
 			ReductionInfo *reductionInfo = access->getReductionInfo();
 			assert(reductionInfo != nullptr);
 			bool wasLastCombination = reductionInfo->combineRegion(access->getAccessRegion(), access->getReductionSlotSet(), /* canCombineToOriginalStorage */ true);
+			access->setLocation(ClusterManager::getCurrentMemoryNode());
+			access->setNewLocalWriteID();
 
 			if (wasLastCombination) {
 				const DataAccessRegion &originalRegion = reductionInfo->getOriginalRegion();
@@ -1155,6 +1162,7 @@ namespace DataAccessRegistration {
 		bool linksWrite = initialStatus._triggersDataLinkWrite < updatedStatus._triggersDataLinkWrite;
 		bool linksConcurrent = initialStatus._triggersDataLinkConcurrent < updatedStatus._triggersDataLinkConcurrent;
 		if (!(access->getType() == AUTO_ACCESS_TYPE && access->getDisableEagerSend() && ClusterManager::autoOptimizeNonAccessed())
+			&& access->getType() != REDUCTION_ACCESS_TYPE
 			&& (linksRead || linksWrite || linksConcurrent)) {
 			assert(access->hasDataLinkStep());
 
@@ -4735,7 +4743,9 @@ namespace DataAccessRegistration {
 					//! accesses. For weak accesses we do not want to update the
 					//! location of the access
 					MemoryPlace const *releaseLocation = nullptr;
-					if ((location == nullptr) && !dataAccess->isWeak()) {
+					if (dataAccess->getType() == REDUCTION_ACCESS_TYPE) {
+						location = nullptr;
+					} else if ((location == nullptr) && !dataAccess->isWeak()) {
 						assert(task->hasMemoryPlace());
 						releaseLocation = task->getMemoryPlace();
 					} else {
@@ -6045,6 +6055,11 @@ namespace DataAccessRegistration {
 						if (dataAccess->isInSymbol(j))
 							translationTable[j] = {(size_t)address, (size_t)translation};
 					}
+				}
+
+				if (dataAccess->getType() == REDUCTION_ACCESS_TYPE && task->isRemoteTask()) {
+					// Set initial location to the directory, as storage starts uninitialized
+					dataAccess->setLocation(Directory::getDirectoryMemoryPlace());
 				}
 
 				return true;
