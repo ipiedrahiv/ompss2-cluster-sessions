@@ -99,7 +99,7 @@ namespace ExecutionWorkflow {
 			// Eager send is not compatible with weakconcurrent accesses, because
 			// an updated location is used to mean that the data was updated by
 			// a (strong) concurrent access.
-			_allowEagerSend(access->getType() != CONCURRENT_ACCESS_TYPE && access->getType() != WRITE_ACCESS_TYPE)
+			_allowEagerSend(access->getType() != CONCURRENT_ACCESS_TYPE && access->getType() != WRITE_ACCESS_TYPE && access->getType() != REDUCTION_ACCESS_TYPE)
 		{
 			access->setDataLinkStep(this);
 

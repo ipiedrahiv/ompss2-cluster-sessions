@@ -66,6 +66,7 @@ namespace TaskOffloading {
 			(satInfo._src == -1) ? nullptr : ClusterManager::getMemoryNodeOrDirectory(satInfo._src);
 
 		if (satInfo._eagerSendTag != 0) {
+			assert (satInfo._reductionTypeAndOperatorIndex == no_reduction_type_and_operator);
 			assert(loc != nullptr);
 			assert(!loc->isDirectoryMemoryPlace());
 			DataTransfer *dt = ClusterManager::fetchDataRaw(satInfo._region, loc, satInfo._eagerSendTag, /* block */ false);
