@@ -1251,9 +1251,9 @@ namespace DataAccessRegistration {
 							assert(access->receivedReductionInfo());
 							assert(dataAccess->getReductionInfo() == access->getReductionInfo());
 
-							assert(dataAccess->getReductionSlotSet().size() ==
-								access->getReductionSlotSet().size()
-							);
+							size_t newSize = std::max(dataAccess->getReductionSlotSet().size(), access->getReductionSlotSet().size());
+							dataAccess->getReductionSlotSet().resize(newSize);
+							access->getReductionSlotSet().resize(newSize);
 
 							dataAccess->getReductionSlotSet() |= access->getReductionSlotSet();
 
@@ -2260,11 +2260,18 @@ namespace DataAccessRegistration {
 
 		// ReductionSlotSet
 		if (updateOperation._reductionSlotSet.size() > 0) {
-			assert((access->getObjectType() == access_type) || (access->getObjectType() == fragment_type) || (access->getObjectType() == taskwait_type));
 			assert(access->getType() == REDUCTION_ACCESS_TYPE);
-			assert(access->getReductionSlotSet().size() == updateOperation._reductionSlotSet.size());
-
-			access->getReductionSlotSet() |= updateOperation._reductionSlotSet;
+			//assert(access->getReductionSlotSet().size() == updateOperation._reductionSlotSet.size());
+			boost::dynamic_bitset<> &reductionSlotSet = access->getReductionSlotSet();
+			size_t newSize = std::max(reductionSlotSet.size(), updateOperation._reductionSlotSet.size());
+			reductionSlotSet.resize(newSize);
+			if (newSize == updateOperation._reductionSlotSet.size()) {
+				access->getReductionSlotSet() |= updateOperation._reductionSlotSet;
+			} else {
+				boost::dynamic_bitset<> newSlots = updateOperation._reductionSlotSet;
+				newSlots.resize(newSize);
+				access->getReductionSlotSet() |= newSlots;
+			}
 			access->setReceivedReductionSlotSet();
 		}
 

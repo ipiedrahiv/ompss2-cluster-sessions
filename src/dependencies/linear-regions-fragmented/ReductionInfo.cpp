@@ -33,11 +33,11 @@ ReductionInfo::ReductionInfo(DataAccessRegion region, reduction_type_and_operato
 	const long nCpus = CPUManager::getTotalCPUs();
 	assert(nCpus > 0);
 	
-	const size_t maxSlots = getMaxSlots();
-	_slots.reserve(maxSlots);
-	_freeSlotIndices.reserve(maxSlots);
+	const size_t initialSlots = getInitialSlots();
+	_slots.reserve(initialSlots);
+	_freeSlotIndices.reserve(initialSlots);
 	_currentCpuSlotIndices.resize(nCpus, -1);
-	_isAggregatingSlotIndex.resize(maxSlots);
+	_isAggregatingSlotIndex.resize(initialSlots);
 }
 
 ReductionInfo::~ReductionInfo()
@@ -109,8 +109,6 @@ size_t ReductionInfo::getFreeSlotIndex(size_t virtualCpuId) {
 		_freeSlotIndices.pop_back();
 	}
 	else {
-		FatalErrorHandler::failIf(_slots.size() > getMaxSlots() + (_isOriginalStorageAvailable ? 0 : -1),
-				"Maximum number of private storage slots reached");
 		freeSlotIndex = _slots.size();
 		_slots.emplace_back();
 	}
@@ -209,6 +207,9 @@ void ReductionInfo::makeOriginalStorageRegionAvailable(const DataAccessRegion &r
 // in a private copy (known as an "aggregating slot").
 bool ReductionInfo::combineRegion(const DataAccessRegion& subregion, reduction_slot_set_t& accessedSlots, bool canCombineToOriginalStorage) {
 	assert(accessedSlots.size() > 0);
+	if (accessedSlots.size() > _isAggregatingSlotIndex.size()) {
+		_isAggregatingSlotIndex.resize(accessedSlots.size());
+	}
 	
 	char *originalRegionAddress = (char*)_region.getStartAddress();
 	char *originalSubregionAddress = (char*)subregion.getStartAddress();

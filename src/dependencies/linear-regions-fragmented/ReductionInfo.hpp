@@ -33,7 +33,7 @@ class ReductionInfo
 		
 		typedef boost::dynamic_bitset<> reduction_slot_set_t;
 		
-		inline static size_t getMaxSlots();
+		inline static size_t getInitialSlots();
 		
 		ReductionInfo(DataAccessRegion region, reduction_type_and_operator_index_t typeAndOperatorIndex,
 				std::function<void(void*, void*, size_t)> initializationFunction, std::function<void(void*, void*, size_t)> combinationFunction);
@@ -83,7 +83,7 @@ class ReductionInfo
 		spinlock_t _lock;
 };
 
-inline size_t ReductionInfo::getMaxSlots()
+inline size_t ReductionInfo::getInitialSlots()
 {
 	// Note: This can't become a const static member because on its definition
 	// it would call 'getTotalCPUs' before the runtime is properly initialized

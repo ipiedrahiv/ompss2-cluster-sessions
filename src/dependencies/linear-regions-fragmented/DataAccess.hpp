@@ -182,7 +182,7 @@ public:
 		assert(originator != nullptr);
 
 		if (_type == REDUCTION_ACCESS_TYPE) {
-			_reductionSlotSet.resize(ReductionInfo::getMaxSlots());
+			_reductionSlotSet.resize(ReductionInfo::getInitialSlots());
 		}
 	}
 
@@ -757,6 +757,9 @@ public:
 
 	void setReductionAccessedSlot(size_t slotIndex)
 	{
+		if (slotIndex >= _reductionSlotSet.size()) {
+			_reductionSlotSet.resize(slotIndex+1);
+		}
 		_reductionSlotSet.set(slotIndex);
 	}
 
