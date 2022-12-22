@@ -4749,7 +4749,8 @@ namespace DataAccessRegistration {
 		CPUDependencyData &hpDependencyData,
 		WriteID writeID,
 		MemoryPlace const *location,
-		bool specifyingDependency
+		bool specifyingDependency,
+		DataTransfer *eagerReleaseDataTransfer
 	) {
 		Instrument::enterReleaseAccessRegion();
 		assert(task != nullptr);
@@ -4792,7 +4793,25 @@ namespace DataAccessRegistration {
 					}
 
 					if (dataAccess->getType() == REDUCTION_ACCESS_TYPE && task->isRunnable()) {
-						releaseReductionStorage(task, dataAccess, region, computePlace);
+						if (!task->isOffloadedTask()) {
+							releaseReductionStorage(task, dataAccess, region, computePlace);
+						} else if (task->isOffloadedTask()) {
+							ExecutionWorkflow::Step *privateCopyStep = new ExecutionWorkflow::Step();
+							if (eagerReleaseDataTransfer != nullptr) {
+								// Add completion callback to existing data transfer (which matches
+								// granularity of sender [here may be fragmented]
+								eagerReleaseDataTransfer->addCompletionCallback([=]() {
+									privateCopyStep->start();
+								});
+							} else {
+								hpDependencyData._stepsToStart.push_back(privateCopyStep);
+							}
+							ExecutionWorkflow::Workflow *workflow = task->getWorkflow();
+							ExecutionWorkflow::CounterStep *counterStep = dataAccess->getOriginator()->getReductionTransferCounterStep();
+							assert(counterStep != nullptr);
+							counterStep->decrement(dataAccess->getAccessRegion().getSize());
+							workflow->enforceOrder(privateCopyStep, counterStep);
+						}
 					}
 
 					//! If a valid location has not been provided then we use
@@ -5521,8 +5540,9 @@ namespace DataAccessRegistration {
 						DataAccess *dataAccess = &(*position);
 						assert(dataAccess != nullptr);
 						if (!dataAccess->complete()) {
-							if (dataAccess->getType() == AUTO_ACCESS_TYPE
-										&& dataAccess->getDisableEagerSend()) {
+							if (dataAccess->getType() == REDUCTION_ACCESS_TYPE
+								|| (dataAccess->getType() == AUTO_ACCESS_TYPE
+										&& dataAccess->getDisableEagerSend())) {
 								DataAccessStatusEffects initialStatus(dataAccess);
 								dataAccess->setComplete();
 								DataAccessStatusEffects updatedStatus(dataAccess);

@@ -431,6 +431,13 @@ namespace ExecutionWorkflow {
 						&& !dataAccess->readSatisfied()) {      // And not already read satisfied.
 						bytesReductionLaterDataCopies += dataAccess->getAccessRegion().getSize();
 					}
+
+					// (2) Copy back private copy from an offloaded task
+					// If we are offloading the task to another node, then it will be necessary
+					// to copy the value back into a private copy of the variable.
+					if (targetComputePlace->getType() == nanos6_cluster_device) {
+						bytesReductionLaterDataCopies += dataAccess->getAccessRegion().getSize();
+					}
 				}
 
 				return true;

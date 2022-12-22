@@ -25,9 +25,13 @@
 
 #include <MessageReleaseAccess.hpp>
 #include <MessageDataSend.hpp>
+#include <MessageId.hpp>
 
 #include "executors/threads/WorkerThread.hpp"
 #include "dependencies/DataAccessType.hpp"
+#include <ClusterServicesPolling.hpp>
+#include <ObjectAllocator.hpp>
+#include "InstrumentReductions.hpp"
 
 class ComputePlace;
 class MemoryPlace;
@@ -337,18 +341,54 @@ namespace ExecutionWorkflow {
 
 			// If location is a host device on this node it is a cluster
 			// device from the point of view of the remote node
-			const MemoryPlace * const clusterLocation =
+			const MemoryPlace *clusterLocation =
 				(location->getType() == nanos6_cluster_device || location->isDirectoryMemoryPlace())
 				? location
 				: ClusterManager::getCurrentMemoryNode();
 
-			_infoLock.lock();
 
+			int eagerReleaseTag = -1;
+			if (access->getType() == REDUCTION_ACCESS_TYPE
+				&& !access->getReductionSlotSet().none()) {
+				int numIds = ClusterManager::getMPIFragments(access->getAccessRegion());
+				eagerReleaseTag = MessageId::nextMessageId(numIds);
+				assert(access->hasLocation());
+				assert(access->allocatedReductionInfo() || (access->receivedReductionInfo() && access->receivedReductionSlotSet()));
+
+				ReductionInfo *reductionInfo = access->getReductionInfo();
+				assert(reductionInfo != nullptr);
+
+				// We will release the access with the location of our private copy of the
+				// variable (not the original variable). The private copy will always already
+				// be at the current node.
+				clusterLocation = ClusterManager::getCurrentMemoryNode();
+				
+				MemoryPlace *destLocation = ClusterManager::getMemoryNode(_offloader->getIndex());
+				void *translatedAddr = access->getTranslatedStartAddress();
+				DataAccessRegion translatedRegion(translatedAddr, region.getSize());
+				DataTransfer *dt = ClusterManager::sendDataRaw(translatedRegion, destLocation, eagerReleaseTag);
+				dt->addCompletionCallback([=]{
+						// Release the ReductionInfo now that the copy back of our private copy has
+						// completed.
+						const DataAccessRegion &originalRegion = reductionInfo->getOriginalRegion();
+
+						ObjectAllocator<ReductionInfo>::deleteObject(reductionInfo);
+
+						Instrument::deallocatedReductionInfo(
+							access->getInstrumentationId(),
+							reductionInfo,
+							originalRegion);
+						});
+				ClusterPollingServices::PendingQueue<DataTransfer>::addPending(dt);
+			}
+
+			_infoLock.lock();
 			_releaseInfo.push_back(
 				MessageReleaseAccess::ReleaseAccessInfo(
 					region,
 					access->getWriteID(),
-					clusterLocation)
+					clusterLocation,
+					eagerReleaseTag)
 			);
 
 			_infoLock.unlock();

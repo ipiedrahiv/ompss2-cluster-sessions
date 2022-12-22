@@ -261,16 +261,31 @@ namespace TaskOffloading {
 			assert(Directory::isDirectoryMemoryPlace(location)
 				|| location->getType() == nanos6_cluster_device);
 
+			DataTransfer *dt = nullptr;
+			if (accessinfo._eagerReleaseTag != -1) {
+				DataAccessRegion translatedRegion = DataAccessRegistration::getTranslatedRegion(task, accessinfo._region);
+				// Program data transfer all in one piece now
+				dt = ClusterManager::fetchDataRaw(
+					translatedRegion,
+					location,
+					accessinfo._eagerReleaseTag,
+					/* block */ false);
+				LiveDataTransfers::add(dt);
+			}
+
 			DataAccessRegistration::releaseAccessRegion(
 				task, accessinfo._region,
 				NO_ACCESS_TYPE,                 // not relevant as specifyingDependency = false
 				false,                          // not relevant as specifyingDependency = false
 				cpu, hpDependencyData,
 				accessinfo._writeID, location,
-				false                           // specifyingDependency
+				false,                          // specifyingDependency
+				dt
 			);
+			if (dt) {
+				ClusterPollingServices::PendingQueue<DataTransfer>::addPending(dt);
+			}
 		}
-
 		DataAccessRegistration::processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks(
 			hpDependencyData, cpu, true
 		);
