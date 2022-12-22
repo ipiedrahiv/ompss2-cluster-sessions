@@ -1009,6 +1009,7 @@ public:
 			&& this->getDataLinkStep() == other->getDataLinkStep()
 			&& this->getNext()._task == other->getNext()._task
 			&& this->getNext()._objectType == other->getNext()._objectType
+			&& this->getReductionInfo() == other->getReductionInfo()
 			&& ((this->getValidNamespacePrevious() == other->getValidNamespacePrevious())
 				|| (!enforceSameNamespacePrevious
 					&& this->getValidNamespacePrevious() >= 0
