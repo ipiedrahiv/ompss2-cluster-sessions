@@ -53,6 +53,11 @@ class ReductionInfo
 		DataAccessRegion getFreeSlotStorage(size_t slotIndex);
 		
 		void makeOriginalStorageRegionAvailable(const DataAccessRegion &region);
+
+		bool originalStorageAvailable() const
+		{
+			return _isOriginalStorageAvailable;
+		}
 		
 	private:
 		

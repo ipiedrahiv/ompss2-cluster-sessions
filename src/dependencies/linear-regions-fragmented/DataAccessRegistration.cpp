@@ -32,6 +32,7 @@
 
 #include <ClusterManager.hpp>
 #include <ExecutionWorkflow.hpp>
+#include <ExecutionWorkflowCluster.hpp>
 #include <InstrumentComputePlaceId.hpp>
 #include <InstrumentDependenciesByAccess.hpp>
 #include <InstrumentDependenciesByAccessLinks.hpp>
@@ -428,7 +429,8 @@ namespace DataAccessRegistration {
 				access->getObjectType() == access_type
 				&& (access->hasLocation() && access->getLocation()->isClusterLocalMemoryPlace())
 				&& access->allocatedReductionInfo()
-				&& access->writeSatisfied();
+				&& access->writeSatisfied()
+				&& !access->getOriginator()->isRemoteTask();
 
 			_combinesReductionToPrivateStorage =
 				access->closesReduction() // last access in a reduction
@@ -445,6 +447,7 @@ namespace DataAccessRegistration {
 				_combinesReductionToPrivateStorage
 				// Being satisfied implies all predecessors (reduction or not) have been completed so
 				// the original storage location is available
+				&&  access->getReductionInfo()->originalStorageAvailable()
 				&& _isSatisfied;
 
 			_triggersDataRelease = false;
@@ -2230,6 +2233,27 @@ namespace DataAccessRegistration {
 			access->setPropagateFromNamespace();
 		}
 
+		if (updateOperation._makeReadSatisfied
+			&& access->getObjectType() == access_type
+			&& access->getType() == REDUCTION_ACCESS_TYPE
+			&& access->allocatedReductionInfo()
+			&& access->getOriginator()->hasReductionTransferCounterStep()) {
+			Task *task = access->getOriginator();
+			ExecutionWorkflow::Workflow *workflow = task->getWorkflow();
+			ExecutionWorkflow::Step *newDataCopyStep = workflow->createDataCopyStep(
+				access->getLocation(),
+				ClusterManager::getCurrentMemoryNode(),
+				access->getAccessRegion(),
+				access,
+				/* isTaskwait */ false,
+				hpDependencyData);
+			ExecutionWorkflow::CounterStep *counterStep = access->getOriginator()->getReductionTransferCounterStep();
+			workflow->enforceOrder(newDataCopyStep, counterStep);
+
+			hpDependencyData._stepsToStart.push_back(newDataCopyStep);
+			counterStep->decrement(access->getAccessRegion().getSize());
+		}
+
 		// ReductionInfo
 		if (updateOperation._setReductionInfo) {
 			access->setPreviousReductionInfo(updateOperation._reductionInfo);
@@ -2486,6 +2510,32 @@ namespace DataAccessRegistration {
 		handleRemovableTasks(hpDependencyData._removableTasks);
 
 		removeFromNamespaceBottomMap(hpDependencyData);
+
+
+		while(hpDependencyData._stepsToStart.size() > 0) {
+			ExecutionWorkflow::Step *step = hpDependencyData._stepsToStart.back();
+			hpDependencyData._stepsToStart.pop_back();
+
+			ExecutionWorkflow::ClusterDataCopyStep *clusterCopy = dynamic_cast<ExecutionWorkflow::ClusterDataCopyStep *>(step);
+			if (clusterCopy) {
+				if (clusterCopy->requiresDataFetch()) {
+					MemoryPlace const *source = clusterCopy->getSourceMemoryPlace();
+					size_t fragments = clusterCopy->getNumFragments();
+					std::vector<ExecutionWorkflow::ClusterDataCopyStep *> clusterCopies;
+					clusterCopies.push_back(clusterCopy);
+					ClusterManager::fetchVector(fragments, clusterCopies, source);
+				}
+			}
+#ifndef NDEBUG
+			bool oldTakenValue = hpDependencyData._inUse.exchange(false);
+#endif
+			step->start();
+#ifndef NDEBUG
+			bool alreadyTaken = false;
+			assert(hpDependencyData._inUse.compare_exchange_strong(alreadyTaken, oldTakenValue));
+#endif
+		}
+
 		Instrument::exitProcessDelayedOperationsSatisfiedOriginatorsAndRemovableTasks();
 	}
 
@@ -4761,12 +4811,15 @@ namespace DataAccessRegistration {
 
 					dataAccess = fragmentAccess(dataAccess, region, accessStructures);
 
-					finalizeAccess(
-						task, dataAccess,
-						region, writeID,
-						releaseLocation, /* OUT */ hpDependencyData,
-						true
-					);
+					if (dataAccess->getType() != REDUCTION_ACCESS_TYPE) {
+					// But defer reductions to notification step, in case waiting for the original access
+						finalizeAccess(
+							task, dataAccess,
+							region, writeID,
+							releaseLocation, /* OUT */ hpDependencyData,
+							true
+						);
+					}
 
 					return true;
 				});

@@ -33,6 +33,9 @@ struct DataAccess;
 class Task;
 class ReductionInfo;
 class MemoryPlace;
+namespace ExecutionWorkflow {
+	class Step;
+}
 
 
 struct CPUDependencyData {
@@ -167,6 +170,7 @@ struct CPUDependencyData {
 	TaskOffloading::SatisfiabilityInfoMap _satisfiabilityMap; // Node's: list of satisfiabilities to send.
 	TaskOffloading::DataSendRegionInfoMap _dataSendRegionInfoMap;
 	TaskOffloading::AccessInfoMap _accessInfoMap;
+	std::vector<ExecutionWorkflow::Step *> _stepsToStart;
 #endif // USE_CLUSTER
 
 	CPUDependencyData()

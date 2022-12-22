@@ -568,6 +568,7 @@ namespace ExecutionWorkflow {
 				//! access, if the access is not write-only
 			 	(objectType == access_type)
 				&& (type != WRITE_ACCESS_TYPE)
+				&& !(type == REDUCTION_ACCESS_TYPE && access->getOriginator()->isRemoteTask())
 				//! and if it is not in the directory (which would mean
 				//! that the data is not yet initialized)
 				&& !source->isDirectoryMemoryPlace()
@@ -576,7 +577,8 @@ namespace ExecutionWorkflow {
 				//! only access part of them.
 				&& (!isWeak || (ClusterManager::getEagerWeakFetch()
 				                && access->getType() != CONCURRENT_ACCESS_TYPE
-				                && access->getType() != AUTO_ACCESS_TYPE))
+				                && access->getType() != AUTO_ACCESS_TYPE)
+							|| (type == REDUCTION_ACCESS_TYPE && !access->getOriginator()->isRemoteTask()))
 			);
 
 		//! If no data transfer is needed, then register the new location if
