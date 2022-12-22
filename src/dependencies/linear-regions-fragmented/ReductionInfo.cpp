@@ -76,6 +76,19 @@ const DataAccessRegion& ReductionInfo::getOriginalRegion() const {
 	return _region;
 }
 
+// Get a new free slot (private copy of the variable), which is guaranteed to
+// be uninitialized.
+size_t ReductionInfo::getNewFreeSlotIndex(void) {
+
+	// Lock required to access _freeSlotIndices simultaneously
+	_lock.lock();
+	size_t freeSlotIndex = _slots.size();
+	_slots.emplace_back();
+	_lock.unlock();
+
+	return freeSlotIndex;
+}
+
 // Allocate a free slot (private copy of the variable) to be running by tasks
 // executing on a particular core. If the core has already participated in the
 // reduction, then return the same slot that was used previously, so it can

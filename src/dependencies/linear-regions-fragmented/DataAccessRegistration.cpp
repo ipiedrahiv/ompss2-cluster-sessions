@@ -6110,30 +6110,39 @@ namespace DataAccessRegistration {
 				DataAccess *dataAccess = &(*position);
 				assert(dataAccess != nullptr);
 
-				if (dataAccess->getType() == REDUCTION_ACCESS_TYPE && !dataAccess->isWeak()) {
-					FatalErrorHandler::failIf(computePlace->getType() != nanos6_host_device,
+				if (dataAccess->getType() == REDUCTION_ACCESS_TYPE
+				    && (task->isOffloadedTask() || !dataAccess->isWeak())) {
+
+					FatalErrorHandler::failIf(
+						computePlace->getType() != nanos6_host_device
+						&& computePlace->getType() != nanos6_cluster_device,
 						"Region dependencies do not support CUDA reductions");
 
 					ReductionInfo *reductionInfo = dataAccess->getReductionInfo();
 					assert(reductionInfo != nullptr);
 
-					size_t slotIndex = reductionInfo->getFreeSlotIndex(computePlace->getIndex());
+					size_t slotIndex =
+						task->isOffloadedTask() ?
+						reductionInfo->getNewFreeSlotIndex() :
+						reductionInfo->getFreeSlotIndex(computePlace->getIndex());
 
-					// Register assigned slot in the data access
 					dataAccess->setReductionAccessedSlot(slotIndex);
 
 					void *address = dataAccess->getAccessRegion().getStartAddress();
 					void *translation = nullptr;
 					const DataAccessRegion &originalFullRegion = reductionInfo->getOriginalRegion();
 					translation = ((char *)reductionInfo->getFreeSlotStorage(slotIndex).getStartAddress()) + ((char *)address - (char *)originalFullRegion.getStartAddress());
+					dataAccess->setTranslatedStartAddress(translation);
 
-					// As we're iterating accesses that might have been split by sibling tasks, it is
-					// possible that we translate the same symbol twice. However, this is not an issue
-					// because symbol translation is relative and it is not mandatory for "address"
-					// to be equal to the first position of the translated symbol
-					for (int j = 0; j < totalSymbols; ++j) {
-						if (dataAccess->isInSymbol(j))
-							translationTable[j] = {(size_t)address, (size_t)translation};
+					if (!dataAccess->isWeak()) {
+						// As we're iterating accesses that might have been split by sibling tasks, it is
+						// possible that we translate the same symbol twice. However, this is not an issue
+						// because symbol translation is relative and it is not mandatory for "address"
+						// to be equal to the first position of the translated symbol
+						for (int j = 0; j < totalSymbols; ++j) {
+							if (dataAccess->isInSymbol(j))
+								translationTable[j] = {(size_t)address, (size_t)translation};
+						}
 					}
 				}
 

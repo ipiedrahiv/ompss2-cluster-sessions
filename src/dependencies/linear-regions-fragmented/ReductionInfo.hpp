@@ -49,6 +49,8 @@ class ReductionInfo
 		void releaseSlotsInUse(size_t virtualCpuId);
 		
 		size_t getFreeSlotIndex(size_t virtualCpuId);
+
+		size_t getNewFreeSlotIndex(void);
 		
 		DataAccessRegion getFreeSlotStorage(size_t slotIndex);
 		
