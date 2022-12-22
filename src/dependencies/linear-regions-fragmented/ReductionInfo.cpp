@@ -218,7 +218,8 @@ void ReductionInfo::makeOriginalStorageRegionAvailable(const DataAccessRegion &r
 // write satisfied (indicated by canCombineToOriginalStorage being true), then
 // the result is written directly to the original variable. Otherwise keep it
 // in a private copy (known as an "aggregating slot").
-bool ReductionInfo::combineRegion(const DataAccessRegion& subregion, reduction_slot_set_t& accessedSlots, bool canCombineToOriginalStorage) {
+bool ReductionInfo::combineRegion(const DataAccessRegion& subregion, reduction_slot_set_t& accessedSlots, bool canCombineToOriginalStorage, char **pTargetStorage) {
+
 	assert(accessedSlots.size() > 0);
 	if (accessedSlots.size() > _isAggregatingSlotIndex.size()) {
 		_isAggregatingSlotIndex.resize(accessedSlots.size());
@@ -253,6 +254,9 @@ bool ReductionInfo::combineRegion(const DataAccessRegion& subregion, reduction_s
 		originalRegionAddress : (char*)_slots[aggregatingSlotIndex].storage;
 	assert(targetRegionAddress != nullptr);
 	char *targetStorage = targetRegionAddress + originalSubregionOffset;
+	if (pTargetStorage) {
+		*pTargetStorage = targetStorage;
+	}
 	
 	reduction_slot_set_t::size_type accessedSlotIndex = accessedSlots.find_first();
 	while (accessedSlotIndex < reduction_slot_set_t::npos) {

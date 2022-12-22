@@ -1135,6 +1135,20 @@ namespace DataAccessRegistration {
 				// This adds the access to the ClusterDataReleaseStep::_releaseInfo vector.
 				// The accesses will be released latter.
 				assert(access->getObjectType() == access_type || access->getObjectType() == top_level_sink_type);
+
+				if (access->getType() == REDUCTION_ACCESS_TYPE
+					&& (access->isWeak() || access->getObjectType() == top_level_sink_type)) {
+					ReductionInfo *reductionInfo = access->getReductionInfo();
+
+					char *targetStorage = nullptr;
+
+					if (!access->getReductionSlotSet().none()) {
+						__attribute__((unused)) bool wasLastCombination =
+							reductionInfo->combineRegion(access->getAccessRegion(), access->getReductionSlotSet(), false, &targetStorage);
+					}
+					access->setTranslatedStartAddress(targetStorage);
+				}
+
 				access->getOriginator()->getDataReleaseStep()->addToReleaseList(access);
 
 				if (!ClusterManager::getGroupMessagesEnabled()) {
@@ -3110,7 +3124,8 @@ namespace DataAccessRegistration {
 						(task->getTaskInfo()->implementations[0].task_label != nullptr) ? task->getTaskInfo()->implementations[0].task_label : task->getTaskInfo()->implementations[0].declaration_source,
 						"'");
 
-					if (access->getType() == REDUCTION_ACCESS_TYPE) {
+					if (access->getType() == REDUCTION_ACCESS_TYPE
+						&& !access->getOriginator()->isRemoteTask()) {
 						access->setClosesReduction();
 					}
 				}

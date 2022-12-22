@@ -44,7 +44,7 @@ class ReductionInfo
 		
 		const DataAccessRegion& getOriginalRegion() const;
 		
-		bool combineRegion(const DataAccessRegion& subregion, reduction_slot_set_t& accessedSlots, bool canCombineToOriginalStorage);
+		bool combineRegion(const DataAccessRegion& subregion, reduction_slot_set_t& accessedSlots, bool canCombineToOriginalStorage, char **targetStorage = nullptr);
 		
 		void releaseSlotsInUse(size_t virtualCpuId);
 		
