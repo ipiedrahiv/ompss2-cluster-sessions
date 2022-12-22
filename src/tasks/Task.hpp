@@ -47,6 +47,7 @@ namespace ExecutionWorkflow {
 	class Workflow;
 	class DataReleaseStep;
 	class DataLinkStep;
+	class CounterStep;
 };
 
 namespace TaskOffloading {
@@ -136,6 +137,7 @@ private:
 	SpinLock _releaseStepInfoLock;
 	ExecutionWorkflow::DataReleaseStep *_dataReleaseStep;
 	friend class ExecutionWorkflow::DataReleaseStep;
+	ExecutionWorkflow::CounterStep *_reductionTransferCounterStep;
 
 	//! NUMA Locality scheduling hints
 	uint64_t _NUMAHint;
@@ -1110,6 +1112,37 @@ public:
 	bool hasDataReleaseStep() const
 	{
 		return (_dataReleaseStep != nullptr);
+	}
+
+	//! Set the reduction transfer CounterStep of the task. The task must not
+	//! have a reduction transfer CounterStep already
+	void setReductionTransferCounterStep(ExecutionWorkflow::CounterStep *step)
+	{
+		assert(!hasReductionTransferCounterStep());
+		assert(step != nullptr);
+
+		_reductionTransferCounterStep = step;
+	}
+
+	//! Unset the reduction transfer CounterStep of the access. The access must
+	//! have a reduction transfer CounterStep already
+	void unsetReductionTransferCounterStep()
+	{
+		assert(hasReductionTransferCounterStep());
+
+		_reductionTransferCounterStep = nullptr;
+	}
+
+	//! Get the reduction transfer CounterStep of the access.
+	ExecutionWorkflow::CounterStep *getReductionTransferCounterStep() const
+	{
+		return _reductionTransferCounterStep;
+	}
+
+	//! Check if the access has a reduction transfer CounterStep
+	bool hasReductionTransferCounterStep() const
+	{
+		return (_reductionTransferCounterStep != nullptr);
 	}
 
 
