@@ -220,10 +220,12 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 		ret = MPI_Comm_rank(MPI_COMM_WORLD, &_externalRank);
 
 		// When there is not parent it is part of the initial communicator.
-		if (clusterSplitEnv.isPresent()) {
+		if (clusterSplitEnv.isPresent() && clusterSplitEnv.getValue().length() > 0) {
+			// Run in hybrid MPI + OmpSs-2@Cluster mode
 			std::string clusterSplit = clusterSplitEnv.getValue();
 			splitCommunicator(clusterSplit);
 		} else {
+			// Run in pure OmpSs-2@Cluster mode
 			_apprankNum = 0;
 			_numAppranks = 1;
 			int n = _numExternalRanks / _numNodes;
