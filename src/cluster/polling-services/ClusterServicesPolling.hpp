@@ -92,8 +92,6 @@ public:
 	//! shutdown interface that will be called from here.
 	inline static void shutdown(bool hybridOnly = false)
 	{
-		assert(ClusterManager::inClusterMode()
-			|| ClusterManager::getInitData().clusterMalleabilityEnabled());
 		assert(MemoryAllocator::isInitialized());
 		assert(_activeClusterPollingServices.load() > 0);
 
