@@ -310,6 +310,8 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 		spawnArgc = argv[0];
 		spawnArgv = &argv[1];
 	}
+
+	this->shareDLBInfo();
 }
 
 
