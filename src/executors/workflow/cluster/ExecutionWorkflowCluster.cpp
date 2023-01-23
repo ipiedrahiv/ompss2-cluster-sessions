@@ -117,6 +117,8 @@ namespace ExecutionWorkflow {
 				region, locationIndex,
 				read, write,
 				access->isWeak(), access->getType(),
+				access->getReductionTypeAndOperatorIndex(),
+				access->getReductionIndex(),
 				writeID, _task->getOffloadedTaskId(), eagerSendTag
 			);
 
@@ -170,13 +172,22 @@ namespace ExecutionWorkflow {
 		bool deleteStep = false;
 		{
 			// Get a lock (see comment in ClusterDataLinkStep::linkRegion).
-			std::lock_guard<SpinLock> guard(_lock);
+			_lock.lock();
 			assert(_targetMemoryPlace != nullptr);
 
-			int location = -1;
-			if (_read || _write) {
+			int location;
+			if (_accessType == REDUCTION_ACCESS_TYPE) {
+				// Reduction access for an offloaded task always starts with the
+				// identity element. Indicate this using "-42" which means
+				// uninitialized memory.
+				location = -42;
+			} else if (_read || _write) {
+				// Read satisfied: use source memory place index
 				assert(_sourceMemoryPlace != nullptr);
 				location = _sourceMemoryPlace->getIndex();
+			} else {
+				// Not read satisfied: -1 means nullptr
+				location = -1;
 			}
 			Instrument::logMessage(
 					Instrument::ThreadInstrumentationContext::getCurrent(),
@@ -219,26 +230,31 @@ namespace ExecutionWorkflow {
 				_writeID,
 				_read, _write,
 				_weak, _accessType,
+				_reductionTypeAndOperatorIndex,
+				_reductionIndex,
 				_namespacePredecessor,
 				eagerSendTag
 			);
 
 			const size_t linkedBytes = _region.getSize();
+
+			_lock.unlock();
+			releaseSuccessors();
+			_lock.lock();
+
 			//! If at the moment of offloading the access is not both
 			//! read and write satisfied, then the info will be linked
 			//! later on. In this case, we just account for the bytes that
 			//! we link now, the Step will be deleted when all the bytes
 			//! are linked through linkRegion method invocation
+			//! Do it with the lock taken to avoid race conditions.
 			if (_read && _write) {
 				deleteStep = true;
 			} else {
 				_bytesToLink -= linkedBytes;
 				_started = true;
 			}
-
-			// Release successors before releasing the lock (otherwise
-			// ClusterDataLinkStep::linkRegion may delete this step first).
-			releaseSuccessors();
+			_lock.unlock();
 		}
 
 		if (deleteStep) {

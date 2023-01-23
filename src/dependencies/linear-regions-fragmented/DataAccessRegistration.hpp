@@ -20,7 +20,7 @@
 class ClusterNode;
 class ComputePlace;
 class Task;
-
+class DataTransfer;
 
 namespace DataAccessRegistration {
 	//! \brief creates a task data access taking into account repeated accesses but does not link it to previous accesses nor superaccesses
@@ -68,7 +68,8 @@ namespace DataAccessRegistration {
 		CPUDependencyData &dependencyData,
 		WriteID writeID = 0,
 		MemoryPlace const *location = nullptr,
-		bool specifyingDependency = true
+		bool specifyingDependency = true,
+		DataTransfer *eagerReleaseDataTransfer = nullptr
 	);
 
 	void unregisterLocallyPropagatedTaskDataAccesses(
@@ -235,6 +236,8 @@ namespace DataAccessRegistration {
 	void accessInfo(Task *task, DataAccessRegion region, CPUDependencyData &hpDependencyData, bool noEagerSend, bool isReadOnly);
 
 	bool supportsDataTracking();
+
+	DataAccessRegion getTranslatedRegion(Task *task, DataAccessRegion region);
 } // namespace DataAccessRegistration
 
 

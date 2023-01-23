@@ -47,15 +47,6 @@ namespace ExecutionWorkflow {
 		Step *step;
 		Instrument::enterCreateDataCopyStep(isTaskwait);
 
-		/* At the moment we do not support data copies for accesses
-			* of the following types. This essentially mean that devices,
-			* e.g. Cluster, CUDA, do not support these accesses. */
-		if (access->getType() == REDUCTION_ACCESS_TYPE) {
-			step = new Step();
-			Instrument::exitCreateDataCopyStep(isTaskwait);
-			return step;
-		}
-
 		assert(targetMemoryPlace != nullptr);
 		assert(!targetMemoryPlace->isDirectoryMemoryPlace());
 
@@ -67,7 +58,7 @@ namespace ExecutionWorkflow {
 		// controlled by cluster.eager_weak_fetch) and the registration will be
 		// done when we receive MessageSatisfiability.
 		if (sourceMemoryPlace == nullptr) {
-			assert(access->isWeak());
+			assert(access->isWeak() || access->getType() == REDUCTION_ACCESS_TYPE);
 		}
 
 		// Take the source memory type, except nullptr and the current memory node both
@@ -372,6 +363,7 @@ namespace ExecutionWorkflow {
 		// CPUDependencyData &hpDependencyData2 =
 		//	(createCpu == nullptr) ? localDependencyData2 : createCpu->getDependencyData();
 		CPUDependencyData &hpDependencyData2 = localDependencyData2;
+		size_t bytesReductionLaterDataCopies = 0;
 
 		DataAccessRegistration::processAllDataAccesses(
 			task,
@@ -419,10 +411,46 @@ namespace ExecutionWorkflow {
 
 				releaseStep->addAccess(dataAccess);
 
+				// Special handling of data copies for reductions, as these copies
+				// cannot (always) happen before the task executes. These data copies
+				// will get created later, and they will have to finish before the
+				// notification step executes (which is when the various copies of the
+				// reduction variable get combined). Count up the total number of bytes
+				// that will eventually have to be copied, in either direction.
+				if (dataAccess->getType() == REDUCTION_ACCESS_TYPE) {
+
+					// (1) Copy in the original value
+					// Combining with the original value of the variable will be done on
+					// the original node. It is only done for the first access in a chain
+					// of reduction access. Nothing special is needed if the access is already
+					// read satisfied, as the normal DataCopyStep created above will perform
+					// the copy before the task executes. Note: this is safe as we have the
+					// lock on the task data accesses.
+					if (!task->isRemoteTask()                   // This is the original node.
+						&& dataAccess->allocatedReductionInfo() // It's the first reduction access.
+						&& !dataAccess->readSatisfied()) {      // And not already read satisfied.
+						bytesReductionLaterDataCopies += dataAccess->getAccessRegion().getSize();
+					}
+
+					// (2) Copy back private copy from an offloaded task
+					// If we are offloading the task to another node, then it will be necessary
+					// to copy the value back into a private copy of the variable.
+					if (targetComputePlace->getType() == nanos6_cluster_device) {
+						bytesReductionLaterDataCopies += dataAccess->getAccessRegion().getSize();
+					}
+				}
+
 				return true;
 			}
 		);
 
+		// If there are any reduction accesses that will need extra copies to be created later, then
+		// make a CounterStep in the workflow that delays the notification step until they have all completed.
+		if (bytesReductionLaterDataCopies > 0) {
+			CounterStep *counterStep = new CounterStep(bytesReductionLaterDataCopies, notificationStep);
+			workflow->enforceOrder(counterStep, notificationStep);
+			task->setReductionTransferCounterStep(counterStep);
+		}
 
 		if (executionStep->ready()) {
 			workflow->addRootStep(executionStep);

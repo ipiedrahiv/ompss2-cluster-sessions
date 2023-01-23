@@ -32,6 +32,7 @@
 
 #include <ClusterManager.hpp>
 #include <ExecutionWorkflow.hpp>
+#include <ExecutionWorkflowCluster.hpp>
 #include <InstrumentComputePlaceId.hpp>
 #include <InstrumentDependenciesByAccess.hpp>
 #include <InstrumentDependenciesByAccessLinks.hpp>
@@ -420,13 +421,19 @@ namespace DataAccessRegistration {
 				_propagatesReductionSlotSetToNext = false;
 			}
 
+			// The first task in the reduction makes the original storage location
+			// available (to all reduction tasks) as soon as it is write satisfied.
+			// Only do this on the original node to avoid having to initialize the
+			// original storage location.
 			_makesReductionOriginalStorageAvailable =
 				access->getObjectType() == access_type
+				&& (access->hasLocation() && access->getLocation()->isClusterLocalMemoryPlace())
 				&& access->allocatedReductionInfo()
-				&& access->writeSatisfied();
+				&& access->writeSatisfied()
+				&& !access->getOriginator()->isRemoteTask();
 
 			_combinesReductionToPrivateStorage =
-				access->closesReduction()
+				access->closesReduction() // last access in a reduction
 				// If there are subaccesses, it's the last subaccess that should combine
 				&& !access->hasSubaccesses()
 				// Having received 'ReductionSlotSet' implies that previously inserted reduction accesses
@@ -438,7 +445,9 @@ namespace DataAccessRegistration {
 
 			_combinesReductionToOriginal =
 				_combinesReductionToPrivateStorage
-				// Being satisfied implies all predecessors (reduction or not) have been completed
+				// Being satisfied implies all predecessors (reduction or not) have been completed so
+				// the original storage location is available
+				&&  access->getReductionInfo()->originalStorageAvailable()
 				&& _isSatisfied;
 
 			_triggersDataRelease = false;
@@ -812,6 +821,9 @@ namespace DataAccessRegistration {
 		}
 
 		// Notify reduction original storage has become available
+		// (reduction may have started, using private storage, as soon as the access
+		// was read satisfied, but now that it is also write satisfied, the reduction tasks
+		// can overwrite the original variable)
 		if (initialStatus._makesReductionOriginalStorageAvailable != updatedStatus._makesReductionOriginalStorageAvailable) {
 			assert(!initialStatus._makesReductionOriginalStorageAvailable);
 			assert(access->getObjectType() == access_type);
@@ -822,7 +834,8 @@ namespace DataAccessRegistration {
 			reductionInfo->makeOriginalStorageRegionAvailable(access->getAccessRegion());
 		}
 
-		// Reduction combination to a private reduction storage
+		// Reduction combination to a private reduction storage (original variable still
+		// not write satisfied)
 		if ((initialStatus._combinesReductionToPrivateStorage != updatedStatus._combinesReductionToPrivateStorage)
 			// If we can already combine to the original region directly, we just skip this step
 			&& (initialStatus._combinesReductionToOriginal == updatedStatus._combinesReductionToOriginal)) {
@@ -841,7 +854,8 @@ namespace DataAccessRegistration {
 			assert(!wasLastCombination);
 		}
 
-		// Reduction combination to original region
+		// Reduction combination to original region (because the original variable is
+		// already write satisfied)
 		if (initialStatus._combinesReductionToOriginal != updatedStatus._combinesReductionToOriginal) {
 			assert(!initialStatus._combinesReductionToOriginal);
 			assert(updatedStatus._combinesReductionToPrivateStorage);
@@ -855,6 +869,8 @@ namespace DataAccessRegistration {
 			ReductionInfo *reductionInfo = access->getReductionInfo();
 			assert(reductionInfo != nullptr);
 			bool wasLastCombination = reductionInfo->combineRegion(access->getAccessRegion(), access->getReductionSlotSet(), /* canCombineToOriginalStorage */ true);
+			access->setLocation(ClusterManager::getCurrentMemoryNode());
+			access->setNewLocalWriteID();
 
 			if (wasLastCombination) {
 				const DataAccessRegion &originalRegion = reductionInfo->getOriginalRegion();
@@ -960,6 +976,8 @@ namespace DataAccessRegistration {
 				updateOperation._makeCommutativeSatisfied = true;
 			}
 
+			// Pass the ReductionInfo, which gives the reduction type (e.g. int), operator (e.g. +),
+			// and bookkeeping structures for private copies of the value (slots).
 			if (initialStatus._propagatesReductionInfoToNext != updatedStatus._propagatesReductionInfoToNext) {
 				assert(!initialStatus._propagatesReductionInfoToNext);
 				assert((access->getType() != REDUCTION_ACCESS_TYPE) || (access->receivedReductionInfo() || access->allocatedReductionInfo()));
@@ -967,6 +985,8 @@ namespace DataAccessRegistration {
 				updateOperation._reductionInfo = access->getReductionInfo();
 			}
 
+			// All previous reduction tasks have completed: pass bitset saying which reduction
+			// slots (private copies) have partial results that need combining into the final value.
 			if (initialStatus._propagatesReductionSlotSetToNext != updatedStatus._propagatesReductionSlotSetToNext) {
 				assert(!initialStatus._propagatesReductionSlotSetToNext);
 
@@ -1115,6 +1135,20 @@ namespace DataAccessRegistration {
 				// This adds the access to the ClusterDataReleaseStep::_releaseInfo vector.
 				// The accesses will be released latter.
 				assert(access->getObjectType() == access_type || access->getObjectType() == top_level_sink_type);
+
+				if (access->getType() == REDUCTION_ACCESS_TYPE
+					&& (access->isWeak() || access->getObjectType() == top_level_sink_type)) {
+					ReductionInfo *reductionInfo = access->getReductionInfo();
+
+					char *targetStorage = nullptr;
+
+					if (!access->getReductionSlotSet().none()) {
+						__attribute__((unused)) bool wasLastCombination =
+							reductionInfo->combineRegion(access->getAccessRegion(), access->getReductionSlotSet(), false, &targetStorage);
+					}
+					access->setTranslatedStartAddress(targetStorage);
+				}
+
 				access->getOriginator()->getDataReleaseStep()->addToReleaseList(access);
 
 				if (!ClusterManager::getGroupMessagesEnabled()) {
@@ -1145,6 +1179,7 @@ namespace DataAccessRegistration {
 		bool linksWrite = initialStatus._triggersDataLinkWrite < updatedStatus._triggersDataLinkWrite;
 		bool linksConcurrent = initialStatus._triggersDataLinkConcurrent < updatedStatus._triggersDataLinkConcurrent;
 		if (!(access->getType() == AUTO_ACCESS_TYPE && access->getDisableEagerSend() && ClusterManager::autoOptimizeNonAccessed())
+			&& access->getType() != REDUCTION_ACCESS_TYPE
 			&& (linksRead || linksWrite || linksConcurrent)) {
 			assert(access->hasDataLinkStep());
 
@@ -1233,9 +1268,9 @@ namespace DataAccessRegistration {
 							assert(access->receivedReductionInfo());
 							assert(dataAccess->getReductionInfo() == access->getReductionInfo());
 
-							assert(dataAccess->getReductionSlotSet().size() ==
-								access->getReductionSlotSet().size()
-							);
+							size_t newSize = std::max(dataAccess->getReductionSlotSet().size(), access->getReductionSlotSet().size());
+							dataAccess->getReductionSlotSet().resize(newSize);
+							access->getReductionSlotSet().resize(newSize);
 
 							dataAccess->getReductionSlotSet() |= access->getReductionSlotSet();
 
@@ -2212,6 +2247,27 @@ namespace DataAccessRegistration {
 			access->setPropagateFromNamespace();
 		}
 
+		if (updateOperation._makeReadSatisfied
+			&& access->getObjectType() == access_type
+			&& access->getType() == REDUCTION_ACCESS_TYPE
+			&& access->allocatedReductionInfo()
+			&& access->getOriginator()->hasReductionTransferCounterStep()) {
+			Task *task = access->getOriginator();
+			ExecutionWorkflow::Workflow *workflow = task->getWorkflow();
+			ExecutionWorkflow::Step *newDataCopyStep = workflow->createDataCopyStep(
+				access->getLocation(),
+				ClusterManager::getCurrentMemoryNode(),
+				access->getAccessRegion(),
+				access,
+				/* isTaskwait */ false,
+				hpDependencyData);
+			ExecutionWorkflow::CounterStep *counterStep = access->getOriginator()->getReductionTransferCounterStep();
+			workflow->enforceOrder(newDataCopyStep, counterStep);
+
+			hpDependencyData._stepsToStart.push_back(newDataCopyStep);
+			counterStep->decrement(access->getAccessRegion().getSize());
+		}
+
 		// ReductionInfo
 		if (updateOperation._setReductionInfo) {
 			access->setPreviousReductionInfo(updateOperation._reductionInfo);
@@ -2242,11 +2298,18 @@ namespace DataAccessRegistration {
 
 		// ReductionSlotSet
 		if (updateOperation._reductionSlotSet.size() > 0) {
-			assert((access->getObjectType() == access_type) || (access->getObjectType() == fragment_type) || (access->getObjectType() == taskwait_type));
 			assert(access->getType() == REDUCTION_ACCESS_TYPE);
-			assert(access->getReductionSlotSet().size() == updateOperation._reductionSlotSet.size());
-
-			access->getReductionSlotSet() |= updateOperation._reductionSlotSet;
+			//assert(access->getReductionSlotSet().size() == updateOperation._reductionSlotSet.size());
+			boost::dynamic_bitset<> &reductionSlotSet = access->getReductionSlotSet();
+			size_t newSize = std::max(reductionSlotSet.size(), updateOperation._reductionSlotSet.size());
+			reductionSlotSet.resize(newSize);
+			if (newSize == updateOperation._reductionSlotSet.size()) {
+				access->getReductionSlotSet() |= updateOperation._reductionSlotSet;
+			} else {
+				boost::dynamic_bitset<> newSlots = updateOperation._reductionSlotSet;
+				newSlots.resize(newSize);
+				access->getReductionSlotSet() |= newSlots;
+			}
 			access->setReceivedReductionSlotSet();
 		}
 
@@ -2461,6 +2524,32 @@ namespace DataAccessRegistration {
 		handleRemovableTasks(hpDependencyData._removableTasks);
 
 		removeFromNamespaceBottomMap(hpDependencyData);
+
+
+		while(hpDependencyData._stepsToStart.size() > 0) {
+			ExecutionWorkflow::Step *step = hpDependencyData._stepsToStart.back();
+			hpDependencyData._stepsToStart.pop_back();
+
+			ExecutionWorkflow::ClusterDataCopyStep *clusterCopy = dynamic_cast<ExecutionWorkflow::ClusterDataCopyStep *>(step);
+			if (clusterCopy) {
+				if (clusterCopy->requiresDataFetch()) {
+					MemoryPlace const *source = clusterCopy->getSourceMemoryPlace();
+					size_t fragments = clusterCopy->getNumFragments();
+					std::vector<ExecutionWorkflow::ClusterDataCopyStep *> clusterCopies;
+					clusterCopies.push_back(clusterCopy);
+					ClusterManager::fetchVector(fragments, clusterCopies, source);
+				}
+			}
+#ifndef NDEBUG
+			bool oldTakenValue = hpDependencyData._inUse.exchange(false);
+#endif
+			step->start();
+#ifndef NDEBUG
+			bool alreadyTaken = false;
+			assert(hpDependencyData._inUse.compare_exchange_strong(alreadyTaken, oldTakenValue));
+#endif
+		}
+
 		Instrument::exitProcessDelayedOperationsSatisfiedOriginatorsAndRemovableTasks();
 	}
 
@@ -3035,7 +3124,8 @@ namespace DataAccessRegistration {
 						(task->getTaskInfo()->implementations[0].task_label != nullptr) ? task->getTaskInfo()->implementations[0].task_label : task->getTaskInfo()->implementations[0].declaration_source,
 						"'");
 
-					if (access->getType() == REDUCTION_ACCESS_TYPE) {
+					if (access->getType() == REDUCTION_ACCESS_TYPE
+						&& !access->getOriginator()->isRemoteTask()) {
 						access->setClosesReduction();
 					}
 				}
@@ -3242,7 +3332,8 @@ namespace DataAccessRegistration {
 				DataAccessStatusEffects initialStatus(previous);
 
 				// Mark end of reduction
-				if (previous->getType() == REDUCTION_ACCESS_TYPE) {
+				if (previous->getType() == REDUCTION_ACCESS_TYPE
+					&& !parent->isNodeNamespace()) {
 					if (dataAccess->getReductionTypeAndOperatorIndex() != previous->getReductionTypeAndOperatorIndex()) {
 						// When any access is to be linked with a non-matching reduction access,
 						// we want to mark the preceding reduction access so that it is the
@@ -3293,7 +3384,12 @@ namespace DataAccessRegistration {
 							canPropagateInNamespace = false;
 						} else if((dataAccess->getType() == AUTO_ACCESS_TYPE) || (previous->getType() == AUTO_ACCESS_TYPE)) {
 							canPropagateInNamespace = false;
+						} else if ((dataAccess->getType() == REDUCTION_ACCESS_TYPE) || (previous->getType() == REDUCTION_ACCESS_TYPE)) {
+							// TODO namespace propagation of reduction to the same reduction should be OK, but
+							// disable all namespace propagations involving reductions for now.
+							canPropagateInNamespace = false;
 						}
+
 						if (canPropagateInNamespace) {
 							Instrument::namespacePropagation(Instrument::NamespaceSuccessful, dataAccess->getAccessRegion());
 						} else {
@@ -3871,7 +3967,8 @@ namespace DataAccessRegistration {
 
 					if (isReleaseAccess && accessOrFragment->hasDataLinkStep()
 						&& accessOrFragment->getType() != COMMUTATIVE_ACCESS_TYPE
-						&& accessOrFragment->getType() != CONCURRENT_ACCESS_TYPE) {
+						&& accessOrFragment->getType() != CONCURRENT_ACCESS_TYPE
+						&& accessOrFragment->getType() != REDUCTION_ACCESS_TYPE) {
 						bool notSat = false;
 						if (!accessOrFragment->readSatisfied()) {
 							accessOrFragment->setReadSatisfied(location);
@@ -4331,12 +4428,15 @@ namespace DataAccessRegistration {
 	{
 		DataAccessLink previous = bottomMapEntry->_link;
 		DataAccessType accessType = bottomMapEntry->_accessType;
-		assert(bottomMapEntry->_reductionTypeAndOperatorIndex == no_reduction_type_and_operator);
+		reduction_type_and_operator_index_t reductionTypeAndOperatorIndex =
+			bottomMapEntry->_reductionTypeAndOperatorIndex;
+
 		{
 			DataAccess *topLevelSinkFragment = createAccess(
 				task,
 				top_level_sink_type,
-				accessType, /* not weak */ false, region);
+				accessType, /* not weak */ false, region,
+				reductionTypeAndOperatorIndex);
 
 			// TODO, top level sink fragment, what to do with the symbols?
 
@@ -4390,15 +4490,6 @@ namespace DataAccessRegistration {
 			[&](DataAccess *previousAccess) -> bool
 			{
 				DataAccessStatusEffects initialStatus(previousAccess);
-				// Mark end of reduction
-				if (previousAccess->getType() == REDUCTION_ACCESS_TYPE) {
-					// When a reduction access is to be linked with a top-level sink, we want to mark the
-					// reduction access so that it is the last access of its reduction chain
-					//
-					// Note: This is different from the taskwait above in that a top-level sink will
-					// _always_ mean the reduction is to be closed
-					previousAccess->setClosesReduction();
-				}
 
 				/*
 				 * Link to the top-level sink and unset flag indicating that it was in bottom map.
@@ -4667,7 +4758,8 @@ namespace DataAccessRegistration {
 		CPUDependencyData &hpDependencyData,
 		WriteID writeID,
 		MemoryPlace const *location,
-		bool specifyingDependency
+		bool specifyingDependency,
+		DataTransfer *eagerReleaseDataTransfer
 	) {
 		Instrument::enterReleaseAccessRegion();
 		assert(task != nullptr);
@@ -4710,7 +4802,25 @@ namespace DataAccessRegistration {
 					}
 
 					if (dataAccess->getType() == REDUCTION_ACCESS_TYPE && task->isRunnable()) {
-						releaseReductionStorage(task, dataAccess, region, computePlace);
+						if (!task->isOffloadedTask()) {
+							releaseReductionStorage(task, dataAccess, region, computePlace);
+						} else if (task->isOffloadedTask()) {
+							ExecutionWorkflow::Step *privateCopyStep = new ExecutionWorkflow::Step();
+							if (eagerReleaseDataTransfer != nullptr) {
+								// Add completion callback to existing data transfer (which matches
+								// granularity of sender [here may be fragmented]
+								eagerReleaseDataTransfer->addCompletionCallback([=]() {
+									privateCopyStep->start();
+								});
+							} else {
+								hpDependencyData._stepsToStart.push_back(privateCopyStep);
+							}
+							ExecutionWorkflow::Workflow *workflow = task->getWorkflow();
+							ExecutionWorkflow::CounterStep *counterStep = dataAccess->getOriginator()->getReductionTransferCounterStep();
+							assert(counterStep != nullptr);
+							counterStep->decrement(dataAccess->getAccessRegion().getSize());
+							workflow->enforceOrder(privateCopyStep, counterStep);
+						}
 					}
 
 					//! If a valid location has not been provided then we use
@@ -4718,7 +4828,9 @@ namespace DataAccessRegistration {
 					//! accesses. For weak accesses we do not want to update the
 					//! location of the access
 					MemoryPlace const *releaseLocation = nullptr;
-					if ((location == nullptr) && !dataAccess->isWeak()) {
+					if (dataAccess->getType() == REDUCTION_ACCESS_TYPE) {
+						location = nullptr;
+					} else if ((location == nullptr) && !dataAccess->isWeak()) {
 						assert(task->hasMemoryPlace());
 						releaseLocation = task->getMemoryPlace();
 					} else {
@@ -4727,12 +4839,15 @@ namespace DataAccessRegistration {
 
 					dataAccess = fragmentAccess(dataAccess, region, accessStructures);
 
-					finalizeAccess(
-						task, dataAccess,
-						region, writeID,
-						releaseLocation, /* OUT */ hpDependencyData,
-						true
-					);
+					if (dataAccess->getType() != REDUCTION_ACCESS_TYPE) {
+					// But defer reductions to notification step, in case waiting for the original access
+						finalizeAccess(
+							task, dataAccess,
+							region, writeID,
+							releaseLocation, /* OUT */ hpDependencyData,
+							true
+						);
+					}
 
 					return true;
 				});
@@ -5434,8 +5549,9 @@ namespace DataAccessRegistration {
 						DataAccess *dataAccess = &(*position);
 						assert(dataAccess != nullptr);
 						if (!dataAccess->complete()) {
-							if (dataAccess->getType() == AUTO_ACCESS_TYPE
-										&& dataAccess->getDisableEagerSend()) {
+							if (dataAccess->getType() == REDUCTION_ACCESS_TYPE
+								|| (dataAccess->getType() == AUTO_ACCESS_TYPE
+										&& dataAccess->getDisableEagerSend())) {
 								DataAccessStatusEffects initialStatus(dataAccess);
 								dataAccess->setComplete();
 								DataAccessStatusEffects updatedStatus(dataAccess);
@@ -5954,6 +6070,32 @@ namespace DataAccessRegistration {
 		Instrument::exitHandleExitTaskwait();
 	}
 
+	DataAccessRegion getTranslatedRegion(
+		Task *task, DataAccessRegion region
+	) {
+		TaskDataAccesses &accessStructures = task->getDataAccesses();
+		std::lock_guard<TaskDataAccesses::spinlock_t> guard(accessStructures._lock);
+		void *addr = nullptr; // region.getStartAddress();
+		accessStructures._accesses.processIntersecting(
+			region,
+			[&](TaskDataAccesses::accesses_t::iterator position) -> bool {
+				DataAccess *dataAccess = &(*position);
+				assert(dataAccess != nullptr);
+				addr = dataAccess->getTranslatedStartAddress();
+				return false;
+			});
+		assert(addr != nullptr);
+		DataAccessRegion translatedRegion(addr, region.getSize());
+		return translatedRegion;
+	}
+
+	// For each reduction access:
+	// (1) Get a free reduction slot, which will hold a private copy of the variable
+	//     to allow the reduction tasks to run concurrently (re-using the original
+	//     variable itself, if possible).
+	// (2) Set up the translation table, which will be passed to the task body. This
+	//     translates the original address of the variable into the address of the
+	//     private copy ("translation").
 	void translateReductionAddresses(
 		Task *task, ComputePlace *computePlace,
 		nanos6_address_translation_entry_t *translationTable,
@@ -5977,31 +6119,45 @@ namespace DataAccessRegistration {
 				DataAccess *dataAccess = &(*position);
 				assert(dataAccess != nullptr);
 
-				if (dataAccess->getType() == REDUCTION_ACCESS_TYPE && !dataAccess->isWeak()) {
-					FatalErrorHandler::failIf(computePlace->getType() != nanos6_host_device,
+				if (dataAccess->getType() == REDUCTION_ACCESS_TYPE
+				    && (task->isOffloadedTask() || !dataAccess->isWeak())) {
+
+					FatalErrorHandler::failIf(
+						computePlace->getType() != nanos6_host_device
+						&& computePlace->getType() != nanos6_cluster_device,
 						"Region dependencies do not support CUDA reductions");
 
 					ReductionInfo *reductionInfo = dataAccess->getReductionInfo();
 					assert(reductionInfo != nullptr);
 
-					size_t slotIndex = reductionInfo->getFreeSlotIndex(computePlace->getIndex());
+					size_t slotIndex =
+						task->isOffloadedTask() ?
+						reductionInfo->getNewFreeSlotIndex() :
+						reductionInfo->getFreeSlotIndex(computePlace->getIndex());
 
-					// Register assigned slot in the data access
 					dataAccess->setReductionAccessedSlot(slotIndex);
 
 					void *address = dataAccess->getAccessRegion().getStartAddress();
 					void *translation = nullptr;
 					const DataAccessRegion &originalFullRegion = reductionInfo->getOriginalRegion();
 					translation = ((char *)reductionInfo->getFreeSlotStorage(slotIndex).getStartAddress()) + ((char *)address - (char *)originalFullRegion.getStartAddress());
+					dataAccess->setTranslatedStartAddress(translation);
 
-					// As we're iterating accesses that might have been split by sibling tasks, it is
-					// possible that we translate the same symbol twice. However, this is not an issue
-					// because symbol translation is relative and it is not mandatory for "address"
-					// to be equal to the first position of the translated symbol
-					for (int j = 0; j < totalSymbols; ++j) {
-						if (dataAccess->isInSymbol(j))
-							translationTable[j] = {(size_t)address, (size_t)translation};
+					if (!dataAccess->isWeak()) {
+						// As we're iterating accesses that might have been split by sibling tasks, it is
+						// possible that we translate the same symbol twice. However, this is not an issue
+						// because symbol translation is relative and it is not mandatory for "address"
+						// to be equal to the first position of the translated symbol
+						for (int j = 0; j < totalSymbols; ++j) {
+							if (dataAccess->isInSymbol(j))
+								translationTable[j] = {(size_t)address, (size_t)translation};
+						}
 					}
+				}
+
+				if (dataAccess->getType() == REDUCTION_ACCESS_TYPE && task->isRemoteTask()) {
+					// Set initial location to the directory, as storage starts uninitialized
+					dataAccess->setLocation(Directory::getDirectoryMemoryPlace());
 				}
 
 				return true;

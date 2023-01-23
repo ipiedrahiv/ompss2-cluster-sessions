@@ -12,6 +12,7 @@
 #include "WriteID.hpp"
 #include "OffloadedTaskId.hpp"
 #include "dependencies/DataAccessType.hpp"
+#include <ReductionSpecific.hpp>
 
 class ClusterNode;
 
@@ -35,6 +36,10 @@ namespace TaskOffloading {
 		//! access object type 
 		DataAccessType _accessType;
 
+		// Information for reductions
+		reduction_type_and_operator_index_t _reductionTypeAndOperatorIndex;
+		reduction_index_t _reductionIndex;
+
 		// The unique writeID
 		WriteID _writeID;
 
@@ -50,10 +55,14 @@ namespace TaskOffloading {
 		SatisfiabilityInfo(
 			DataAccessRegion const &region, int src,
 			bool read, bool write, bool weak, DataAccessType accessType,
+			reduction_type_and_operator_index_t reductionTypeAndOperatorIndex,
+			reduction_index_t reductionIndex,
 			WriteID writeID, OffloadedTaskIdManager::OffloadedTaskId id, int eagerSendTag
 		) : _region(region), _src(src),
 			_readSat(read), _writeSat(write),
 			_weak(weak), _accessType(accessType),
+			_reductionTypeAndOperatorIndex(reductionTypeAndOperatorIndex),
+			_reductionIndex(reductionIndex),
 			_writeID(writeID), _id(id), _eagerSendTag(eagerSendTag)
 		{
 			// std::cout << "construct SatisfiabilityInfo with nrp = " << namespacePredecessor << "\n";

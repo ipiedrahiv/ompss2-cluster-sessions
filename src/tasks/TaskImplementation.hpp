@@ -48,6 +48,7 @@ inline Task::Task(
 	_deadline(0),
 	_schedulingHint(NO_HINT),
 	_dataReleaseStep(nullptr),
+	_reductionTransferCounterStep(nullptr),
 	_NUMAHint((uint64_t)-1),
 	_thread(nullptr),
 	_dataAccesses(taskAccessInfo),
@@ -114,6 +115,7 @@ inline void Task::reinitialize(
 	_deadline = 0;
 	_schedulingHint = NO_HINT;
 	_dataReleaseStep = nullptr;
+	_reductionTransferCounterStep = nullptr;
 	_thread = nullptr;
 	_flags = flags;
 	_predecessorCount = 0;

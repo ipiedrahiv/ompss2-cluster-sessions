@@ -27,13 +27,17 @@ public:
 		//! The location on which the access is being released
 		int _location;
 
+		int _eagerReleaseTag;
+
 		ReleaseAccessInfo(
 			const DataAccessRegion &region,
 			WriteID writeID,
-			const MemoryPlace *location
+			const MemoryPlace *location,
+			int eagerReleaseTag
 		) : _region(region.getStartAddress(), region.getSize()),
 			_writeID(writeID),
-			_location(location->getIndex())
+			_location(location->getIndex()),
+			_eagerReleaseTag(eagerReleaseTag)
 		{
 			// The location should be either a cluster node or the
 			// directory (which would mean uninitialized data, maybe "all memory")

@@ -7,6 +7,7 @@
 #ifndef EXECUTION_STEP_HPP
 #define EXECUTION_STEP_HPP
 
+#include <atomic>
 #include <functional>
 
 #include "dependencies/DataAccessType.hpp"
@@ -228,6 +229,37 @@ namespace ExecutionWorkflow {
 		}
 	};
 
+	class CounterStep : public Step {
+		std::atomic<size_t> _count;
+		Step *_notificationStep;
+
+	public:
+		CounterStep(size_t count, Step *notificationStep)
+			: Step(), _count(count), _notificationStep(notificationStep)
+		{
+		}
+
+		inline bool decrement(size_t decr)
+		{
+			const ssize_t countdown = (ssize_t)_count.fetch_sub(decr, std::memory_order_relaxed) - decr;
+			assert(countdown >= 0);
+			return (countdown == 0);
+		}
+
+		//! start the execution of the step
+		inline void start() override
+		{
+			if (_count == 0) {
+				releaseSuccessors();
+				delete this;
+			}
+		}
+
+		Step *getNotificationStep(void)
+		{
+			return _notificationStep;
+		}
+	};
 }
 
 #endif /* EXECUTION_STEP_HPP */

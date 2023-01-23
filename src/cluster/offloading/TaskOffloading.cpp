@@ -35,6 +35,7 @@
 #include <LiveDataTransfers.hpp>
 #include "scheduling/Scheduler.hpp"
 #include "cluster/ClusterMetrics.hpp"
+#include "dependencies/SymbolTranslation.hpp"
 
 namespace TaskOffloading {
 
@@ -65,6 +66,7 @@ namespace TaskOffloading {
 			(satInfo._src == -1) ? nullptr : ClusterManager::getMemoryNodeOrDirectory(satInfo._src);
 
 		if (satInfo._eagerSendTag != 0) {
+			assert (satInfo._reductionTypeAndOperatorIndex == no_reduction_type_and_operator);
 			assert(loc != nullptr);
 			assert(!loc->isDirectoryMemoryPlace());
 			DataTransfer *dt = ClusterManager::fetchDataRaw(satInfo._region, loc, satInfo._eagerSendTag, /* block */ false);
@@ -122,6 +124,18 @@ namespace TaskOffloading {
 
 		Instrument::taskIsOffloaded(task->getInstrumentationTaskId());
 		task->markAsOffloaded();
+
+		// Allocate private storage to receive reductions if needed
+		nanos6_address_translation_entry_t
+			stackTranslationTable[SymbolTranslation::MAX_STACK_SYMBOLS];
+		size_t tableSize = 0;
+		nanos6_address_translation_entry_t *translationTable =
+			SymbolTranslation::generateTranslationTable(
+				task, remoteNode, stackTranslationTable, tableSize);
+		// Free up all symbol translation
+		if (tableSize > 0) {
+			MemoryAllocator::free(translationTable, tableSize);
+		}
 
 		MessageTaskNew *msg = new MessageTaskNew(
 			taskInfo, taskInvocationInfo, flags,
@@ -248,16 +262,31 @@ namespace TaskOffloading {
 			assert(Directory::isDirectoryMemoryPlace(location)
 				|| location->getType() == nanos6_cluster_device);
 
+			DataTransfer *dt = nullptr;
+			if (accessinfo._eagerReleaseTag != -1) {
+				DataAccessRegion translatedRegion = DataAccessRegistration::getTranslatedRegion(task, accessinfo._region);
+				// Program data transfer all in one piece now
+				dt = ClusterManager::fetchDataRaw(
+					translatedRegion,
+					location,
+					accessinfo._eagerReleaseTag,
+					/* block */ false);
+				LiveDataTransfers::add(dt);
+			}
+
 			DataAccessRegistration::releaseAccessRegion(
 				task, accessinfo._region,
 				NO_ACCESS_TYPE,                 // not relevant as specifyingDependency = false
 				false,                          // not relevant as specifyingDependency = false
 				cpu, hpDependencyData,
 				accessinfo._writeID, location,
-				false                           // specifyingDependency
+				false,                          // specifyingDependency
+				dt
 			);
+			if (dt) {
+				ClusterPollingServices::PendingQueue<DataTransfer>::addPending(dt);
+			}
 		}
-
 		DataAccessRegistration::processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks(
 			hpDependencyData, cpu, true
 		);
@@ -341,8 +370,8 @@ namespace TaskOffloading {
 				satInfo[i]._weak,
 				satInfo[i]._region,
 				0, /* TODO: send symbol list, ignored for the moment */
-				no_reduction_type_and_operator,
-				no_reduction_index,
+				satInfo[i]._reductionTypeAndOperatorIndex,
+				satInfo[i]._reductionIndex,
 				satInfo[i]._id);
 		}
 

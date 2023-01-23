@@ -25,9 +25,13 @@
 
 #include <MessageReleaseAccess.hpp>
 #include <MessageDataSend.hpp>
+#include <MessageId.hpp>
 
 #include "executors/threads/WorkerThread.hpp"
 #include "dependencies/DataAccessType.hpp"
+#include <ClusterServicesPolling.hpp>
+#include <ObjectAllocator.hpp>
+#include "InstrumentReductions.hpp"
 
 class ComputePlace;
 class MemoryPlace;
@@ -59,6 +63,10 @@ namespace ExecutionWorkflow {
 		//! type of the corresponding access 
 		DataAccessType _accessType;
 
+		// Information for reductions
+		reduction_type_and_operator_index_t _reductionTypeAndOperatorIndex;
+		reduction_index_t _reductionIndex;
+
 		OffloadedTaskIdManager::OffloadedTaskId _namespacePredecessor;
 		int _namespacePredecessorNode;
 		WriteID _writeID;
@@ -82,6 +90,8 @@ namespace ExecutionWorkflow {
 			_write(access->writeSatisfied()),
 			_weak(access->isWeak()),
 			_accessType(access->getType()),
+			_reductionTypeAndOperatorIndex(access->getReductionTypeAndOperatorIndex()),
+			_reductionIndex(access->getReductionIndex()),
 			_namespacePredecessor(OffloadedTaskIdManager::InvalidOffloadedTaskId),
 			_namespacePredecessorNode(VALID_NAMESPACE_UNKNOWN),
 			_writeID((access->getType() == COMMUTATIVE_ACCESS_TYPE) ? 0 : access->getWriteID()),
@@ -89,7 +99,7 @@ namespace ExecutionWorkflow {
 			// Eager send is not compatible with weakconcurrent accesses, because
 			// an updated location is used to mean that the data was updated by
 			// a (strong) concurrent access.
-			_allowEagerSend(access->getType() != CONCURRENT_ACCESS_TYPE && access->getType() != WRITE_ACCESS_TYPE)
+			_allowEagerSend(access->getType() != CONCURRENT_ACCESS_TYPE && access->getType() != WRITE_ACCESS_TYPE && access->getType() != REDUCTION_ACCESS_TYPE)
 		{
 			access->setDataLinkStep(this);
 
@@ -109,6 +119,9 @@ namespace ExecutionWorkflow {
 					_write = true;
 					_read = true;
 				}
+			} else if (access->getType() == REDUCTION_ACCESS_TYPE) {
+				_read = true;
+				_write = true;
 			}
 
 			assert(targetMemoryPlace->getType() == nanos6_device_t::nanos6_cluster_device);
@@ -328,18 +341,54 @@ namespace ExecutionWorkflow {
 
 			// If location is a host device on this node it is a cluster
 			// device from the point of view of the remote node
-			const MemoryPlace * const clusterLocation =
+			const MemoryPlace *clusterLocation =
 				(location->getType() == nanos6_cluster_device || location->isDirectoryMemoryPlace())
 				? location
 				: ClusterManager::getCurrentMemoryNode();
 
-			_infoLock.lock();
 
+			int eagerReleaseTag = -1;
+			if (access->getType() == REDUCTION_ACCESS_TYPE
+				&& !access->getReductionSlotSet().none()) {
+				int numIds = ClusterManager::getMPIFragments(access->getAccessRegion());
+				eagerReleaseTag = MessageId::nextMessageId(numIds);
+				assert(access->hasLocation());
+				assert(access->allocatedReductionInfo() || (access->receivedReductionInfo() && access->receivedReductionSlotSet()));
+
+				ReductionInfo *reductionInfo = access->getReductionInfo();
+				assert(reductionInfo != nullptr);
+
+				// We will release the access with the location of our private copy of the
+				// variable (not the original variable). The private copy will always already
+				// be at the current node.
+				clusterLocation = ClusterManager::getCurrentMemoryNode();
+				
+				MemoryPlace *destLocation = ClusterManager::getMemoryNode(_offloader->getIndex());
+				void *translatedAddr = access->getTranslatedStartAddress();
+				DataAccessRegion translatedRegion(translatedAddr, region.getSize());
+				DataTransfer *dt = ClusterManager::sendDataRaw(translatedRegion, destLocation, eagerReleaseTag);
+				dt->addCompletionCallback([=]{
+						// Release the ReductionInfo now that the copy back of our private copy has
+						// completed.
+						const DataAccessRegion &originalRegion = reductionInfo->getOriginalRegion();
+
+						ObjectAllocator<ReductionInfo>::deleteObject(reductionInfo);
+
+						Instrument::deallocatedReductionInfo(
+							access->getInstrumentationId(),
+							reductionInfo,
+							originalRegion);
+						});
+				ClusterPollingServices::PendingQueue<DataTransfer>::addPending(dt);
+			}
+
+			_infoLock.lock();
 			_releaseInfo.push_back(
 				MessageReleaseAccess::ReleaseAccessInfo(
 					region,
 					access->getWriteID(),
-					clusterLocation)
+					clusterLocation,
+					eagerReleaseTag)
 			);
 
 			_infoLock.unlock();
@@ -428,6 +477,8 @@ namespace ExecutionWorkflow {
 			WriteID writeID,
 			bool read, bool write,
 			bool weak, DataAccessType accessType,
+			reduction_type_and_operator_index_t reductionTypeAndOperatorIndex,
+			reduction_index_t reductionIndex,
 			OffloadedTaskIdManager::OffloadedTaskId namespacePredecessorId,
 			int eagerWeakSendTag
 		) {
@@ -441,6 +492,8 @@ namespace ExecutionWorkflow {
 					region, source,
 					read, write,
 					weak, accessType,
+					reductionTypeAndOperatorIndex,
+					reductionIndex,
 					writeID, namespacePredecessorId, eagerWeakSendTag)
 			);
 		}
@@ -555,6 +608,7 @@ namespace ExecutionWorkflow {
 				//! access, if the access is not write-only
 			 	(objectType == access_type)
 				&& (type != WRITE_ACCESS_TYPE)
+				&& !(type == REDUCTION_ACCESS_TYPE && access->getOriginator()->isRemoteTask())
 				//! and if it is not in the directory (which would mean
 				//! that the data is not yet initialized)
 				&& !source->isDirectoryMemoryPlace()
@@ -563,7 +617,8 @@ namespace ExecutionWorkflow {
 				//! only access part of them.
 				&& (!isWeak || (ClusterManager::getEagerWeakFetch()
 				                && access->getType() != CONCURRENT_ACCESS_TYPE
-				                && access->getType() != AUTO_ACCESS_TYPE))
+				                && access->getType() != AUTO_ACCESS_TYPE)
+							|| (type == REDUCTION_ACCESS_TYPE && !access->getOriginator()->isRemoteTask()))
 			);
 
 		//! If no data transfer is needed, then register the new location if

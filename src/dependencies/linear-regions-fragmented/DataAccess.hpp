@@ -142,6 +142,9 @@ private:
 	int _validNamespaceSelf;
 	OffloadedTaskIdManager::OffloadedTaskId _namespacePredecessor;
 
+	//! Translation offset for reductions of offloaded accesses
+	std::ptrdiff_t _translationOffset;
+
 public:
 	DataAccess(
 		DataAccessObjectType objectType,
@@ -173,12 +176,13 @@ public:
 		_dataLinkStep(dataLinkStep),
 		_validNamespacePrevious(VALID_NAMESPACE_UNKNOWN),
 		_validNamespaceSelf(VALID_NAMESPACE_UNKNOWN),
-		_namespacePredecessor(OffloadedTaskIdManager::InvalidOffloadedTaskId)
+		_namespacePredecessor(OffloadedTaskIdManager::InvalidOffloadedTaskId),
+		_translationOffset(0)
 	{
 		assert(originator != nullptr);
 
 		if (_type == REDUCTION_ACCESS_TYPE) {
-			_reductionSlotSet.resize(ReductionInfo::getMaxSlots());
+			_reductionSlotSet.resize(ReductionInfo::getInitialSlots());
 		}
 	}
 
@@ -205,7 +209,8 @@ public:
 		_dataLinkStep(other.getDataLinkStep()),
 		_validNamespacePrevious(other.getValidNamespacePrevious()),
 		_validNamespaceSelf(other.getValidNamespaceSelf()),
-		_namespacePredecessor(other.getNamespacePredecessor())
+		_namespacePredecessor(other.getNamespacePredecessor()),
+		_translationOffset(other._translationOffset)
 	{}
 
 	~DataAccess()
@@ -752,6 +757,9 @@ public:
 
 	void setReductionAccessedSlot(size_t slotIndex)
 	{
+		if (slotIndex >= _reductionSlotSet.size()) {
+			_reductionSlotSet.resize(slotIndex+1);
+		}
 		_reductionSlotSet.set(slotIndex);
 	}
 
@@ -944,6 +952,18 @@ public:
 		_concurrentInitialLocation = location;
 	}
 
+	// Get and set the translation offset for offloaded reductions
+	void *getTranslatedStartAddress() const
+	{
+		 char *addr = (char*)getAccessRegion().getStartAddress() + _translationOffset;
+		 return (void *)addr;
+	}
+
+	void setTranslatedStartAddress(void *translatedAddr)
+	{
+		_translationOffset = (char *)translatedAddr - (char *)getAccessRegion().getStartAddress();
+	}
+
 
 	int getMemoryPlaceNodeIndex(const MemoryPlace *location = nullptr) const
 	{
@@ -989,6 +1009,7 @@ public:
 			&& this->getDataLinkStep() == other->getDataLinkStep()
 			&& this->getNext()._task == other->getNext()._task
 			&& this->getNext()._objectType == other->getNext()._objectType
+			&& this->getReductionInfo() == other->getReductionInfo()
 			&& ((this->getValidNamespacePrevious() == other->getValidNamespacePrevious())
 				|| (!enforceSameNamespacePrevious
 					&& this->getValidNamespacePrevious() >= 0
