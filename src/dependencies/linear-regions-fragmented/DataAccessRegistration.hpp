@@ -142,7 +142,12 @@ namespace DataAccessRegistration {
 		bool noflush=false,
 		bool nonLocalOnly=false);
 
-	void handleExitTaskwait(Task *task, ComputePlace *computePlace, CPUDependencyData &dependencyData);
+	void handleExitTaskwait(
+		Task *task,
+		ComputePlace *computePlace,
+		CPUDependencyData &dependencyData,
+		bool noflush
+	);
 
 	//! \brief Mark a Taskwait fragment as completed
 	//!

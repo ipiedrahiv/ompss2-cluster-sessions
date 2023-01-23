@@ -26,20 +26,32 @@ private:
 	bool _mpi_comm_data_raw = 0;
 
 	// Default value useful for asserts
-	int _wrank = -1;   // Rank inside this apprank
-	int _wsize = -1;   // Size of this apprank
-	MPI_Comm INTRA_COMM, INTRA_COMM_DATA_RAW, PARENT_COMM;
+	int _wrank = -1, _wsize = -1;
+	MPI_Comm INTRA_COMM = MPI_COMM_NULL;
+	MPI_Comm INTRA_COMM_DATA_RAW = MPI_COMM_NULL;
+	MPI_Comm PARENT_COMM = MPI_COMM_NULL;
 
-	// Upper bound MPI tag supported by current implementation,
-	// used for masking MPI tags to prevent out-of-range MPI
-	// tags when sending/receiving large number of messages.
+	struct commInfo {
+		MPI_Comm intraComm;
+		MPI_Comm interComm;
+		int groupSize;
+	};
+
+	std::stack<commInfo> _spawnedCommInfoStack;
+
+	// Upper bound MPI tag supported by current implementation, used for masking MPI tags to prevent
+	// out-of-range MPI tags when sending/receiving large number of messages.
 	int _mpi_ub_tag = 0;
 
 	// This is required as we use intensively multi-threading. See the MPI_Abort user manual about
 	// this
 	SpinLock _abortLock;
 
+
 	int convertToBitMask(int mpi_ub_tag) const;
+
+	std::string spawnArgc;
+	char **spawnArgv;
 
 	int createTag(const Message::Deliverable *delv) const
 	{
@@ -90,7 +102,6 @@ private:
 				status = (MPI_Status *) malloc(maxCount * sizeof(MPI_Status));
 				FatalErrorHandler::failIf(status == nullptr,
 					"Could not allocate memory for status array in testCompletionInternal");
-
 			}
 
 			assert(RequestContainer<T>::requests != nullptr);
@@ -111,8 +122,6 @@ private:
 
 	template <typename T>
 	void testCompletionInternal(std::vector<T *> &pending);
-
-	void internal_reset();
 
 	void forEachDataPart(
 		void *startAddress,
@@ -140,6 +149,9 @@ private:
 	void getNodeNumber();
 	void splitCommunicator(const std::string &clusterSplit);
 	void setApprankNumber(const std::string &clusterSplit, int &internalRank);
+	void shareDLBInfo();
+
+	void messengerReinitialize(bool willdie);
 
 public:
 
@@ -152,11 +164,7 @@ public:
 
 	void synchronizeAll(void) override;
 
-	inline void abortAll(int errcode) override
-	{
-		std::lock_guard<SpinLock> guard(_abortLock);
-		MPI_Abort(INTRA_COMM, errcode);
-	}
+	void abortAll(int errcode) override;
 
 	void synchronizeWorld(void) override;
 
@@ -174,6 +182,9 @@ public:
 		bool instrument) override;
 
 	Message *checkMail() override;
+
+	int messengerSpawn(int delta, std::string hostname) override;
+	int messengerShrink(int delta) override;
 
 	inline void testCompletion(std::vector<Message *> &pending) override
 	{
@@ -301,14 +312,22 @@ public:
 			return _internalRankToInstrumentationRank[i];
 		}
 	}
+
+	inline bool isSpawned() const override
+	{
+		assert(_wrank >= 0);
+		return (PARENT_COMM != MPI_COMM_NULL);
+	}
+
+	MPI_Comm getCommunicator() const
+	{
+		return INTRA_COMM;
+	}
 };
 
 //! Register MPIMessenger with the object factory
-namespace
-{
-	const bool __attribute__((unused))_registered_MPI_msn =
-		Messenger::RegisterMSNClass<MPIMessenger>("mpi-2sided");
-}
+const bool __attribute__((unused))_registered_MPI_msn =
+	Messenger::RegisterMSNClass<MPIMessenger>("mpi-2sided");
 
 
 template <typename T> size_t MPIMessenger::RequestContainer<T>::maxCount = 0;

@@ -28,7 +28,7 @@ namespace ClusterPollingServices {
 		static bool executeService()
 		{
 			// The service is already unregistered, so finish it.
-			if (!_singleton._live.load()) {
+			if (_singleton._live.load() == 0) {
 				return false;
 			}
 

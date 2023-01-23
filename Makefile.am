@@ -465,10 +465,12 @@ cluster_sources =
 if USE_CLUSTER
 cluster_sources += \
 	src/cluster/ClusterManager.cpp \
+	src/cluster/Serialize.cpp \
 	src/cluster/NodeNamespace.cpp \
 	src/cluster/ClusterMemoryManagement.cpp \
 	src/cluster/ClusterMetrics.cpp \
 	src/cluster/messages/Message.cpp \
+	src/cluster/messages/MessageType.cpp \
 	src/cluster/messages/MessageDataFetch.cpp \
 	src/cluster/messages/MessageDataSend.cpp \
 	src/cluster/messages/MessageDfree.cpp \
@@ -477,7 +479,6 @@ cluster_sources += \
 	src/cluster/messages/MessageReleaseAccess.cpp \
 	src/cluster/messages/MessageSatisfiability.cpp \
 	src/cluster/messages/MessageTaskNew.cpp \
-	src/cluster/messages/MessageType.cpp \
 	src/cluster/messenger/LiveDataTransfers.cpp \
 	src/cluster/messenger/mpi/MPIMessenger.cpp \
 	src/cluster/offloading/TaskOffloading.cpp \
@@ -488,6 +489,10 @@ cluster_sources += \
 	src/scheduling/schedulers/cluster/ClusterHomeScheduler.cpp \
 	src/scheduling/schedulers/cluster/ClusterBalanceScheduler.cpp \
 	src/scheduling/schedulers/cluster/ClusterRandomScheduler.cpp
+
+if HAVE_SLURM
+cluster_sources += src/cluster/ClusterManagerResizeFunctions.cpp
+endif
 
 cluster_cppflags = \
 	-I$(srcdir)/src/cluster \
@@ -1356,11 +1361,14 @@ noinst_HEADERS += \
 	src/cluster/ClusterShutdownCallback.hpp \
 	src/cluster/ClusterManager.hpp \
 	src/cluster/ClusterMetrics.hpp \
+	src/cluster/HackReport.hpp \
 	src/cluster/ClusterUtil.hpp \
 	src/cluster/ClusterMemoryManagement.hpp \
 	src/cluster/NodeNamespace.hpp \
 	src/cluster/WriteID.hpp \
+	src/cluster/Serialize.hpp \
 	src/cluster/messages/Message.hpp \
+	src/cluster/messages/MessageType.hpp \
 	src/cluster/messages/MessageDataFetch.hpp \
 	src/cluster/messages/MessageDataSend.hpp \
 	src/cluster/messages/MessageDfree.hpp \
@@ -1371,8 +1379,9 @@ noinst_HEADERS += \
 	src/cluster/messages/MessageSatisfiability.hpp \
 	src/cluster/messages/MessageSysFinish.hpp \
 	src/cluster/messages/MessageTaskNew.hpp \
-	src/cluster/messages/MessageType.hpp \
 	src/cluster/messenger/TransferBase.hpp \
+	src/cluster/messages/MessageResize.hpp \
+	src/cluster/messages/MessageResizeImplementation.hpp \
 	src/cluster/messenger/DataTransfer.hpp \
 	src/cluster/messenger/LiveDataTransfers.hpp \
 	src/cluster/messenger/Messenger.hpp \
@@ -1399,11 +1408,15 @@ noinst_HEADERS += \
 	src/scheduling/schedulers/cluster/ClusterBalanceScheduler.hpp \
 	src/scheduling/schedulers/cluster/ClusterRandomScheduler.hpp
 
+if HAVE_SLURM
+noinst_HEADERS += src/cluster/SlurmAPI.hpp
+endif # HAVE_SLURM
+
 memory_default_sources = $(memory_allocator_default_sources) $(vmm_cluster_sources)
 memory_default_cppflags = $(memory_allocator_default_cppflags) $(vmm_cluster_cppflags)
 memory_debug_sources = $(memory_default_sources)
 memory_debug_cppflags = $(memory_default_cppflags)
-else
+else # USE_CLUSTER
 noinst_HEADERS += \
 	src/cluster/null/ClusterManager.hpp \
 	src/cluster/null/NodeNamespace.hpp \
@@ -1417,7 +1430,7 @@ memory_default_sources = $(memory_allocator_debug_sources) $(vmm_smp_sources)
 memory_default_cppflags = $(memory_allocator_debug_cppflags) $(vmm_smp_cppflags)
 memory_debug_sources = $(memory_allocator_debug_sources) $(vmm_smp_sources)
 memory_debug_cppflags = $(memory_allocator_debug_cppflags) $(vmm_smp_cppflags)
-endif
+endif # USE_CLUSTER
 
 # DLB + Cluster: Hybrid
 if HAVE_DLB
@@ -1433,9 +1446,8 @@ endif
 
 dist_memory_sources = $(memory_default_sources) $(memory_debug_sources)
 
-common_libnanos6_cppflags = $(BOOST_CPPFLAGS) -DBOOST_ENABLE_ASSERT_DEBUG_HANDLER $(PTHREAD_CFLAGS) $(hwloc_CFLAGS) $(libnuma_CPPFLAGS) $(CUDA_CFLAGS) $(MPI_CXXFLAGS) $(memkind_CPPFLAGS) $(cluster_cppflags) $(workflow_cppflags) $(monitoring_cppflags) $(cpu_manager_cppflags) $(hardware_counters_cppflags) $(jemalloc_CPPFLAGS)
-common_libnanos6_ldflags = $(openacc_LIBS) $(AM_LDFLAGS) -version-info $(lib_current):$(lib_revision):$(lib_age) $(jemalloc_LIBS) $(PTHREAD_CFLAGS) $(PTHREAD_LIBS) $(LDFLAGS_NOUNDEFINED) $(hwloc_LIBS) $(libnuma_LIBS) $(DLOPEN_LIBS) $(CUDA_LIBS) $(MPI_CXXLDFLAGS) $(memkind_LIBS) $(cpu_manager_ldflags) $(hardware_counters_ldflags)
-
+common_libnanos6_cppflags = $(BOOST_CPPFLAGS) -DBOOST_ENABLE_ASSERT_DEBUG_HANDLER $(PTHREAD_CFLAGS) $(hwloc_CFLAGS) $(libnuma_CPPFLAGS) $(CUDA_CFLAGS) $(MPI_CXXFLAGS) $(memkind_CPPFLAGS) $(cluster_cppflags) $(workflow_cppflags) $(monitoring_cppflags) $(cpu_manager_cppflags) $(hardware_counters_cppflags) $(jemalloc_CPPFLAGS) $(libslurm_CPPFLAGS)
+common_libnanos6_ldflags = $(openacc_LIBS) $(AM_LDFLAGS) -version-info $(lib_current):$(lib_revision):$(lib_age) $(jemalloc_LIBS) $(PTHREAD_CFLAGS) $(PTHREAD_LIBS) $(LDFLAGS_NOUNDEFINED) $(hwloc_LIBS) $(libnuma_LIBS) $(DLOPEN_LIBS) $(CUDA_LIBS) $(MPI_CXXLDFLAGS) $(memkind_LIBS) $(cpu_manager_ldflags) $(hardware_counters_ldflags) $(libslurm_LIBS)
 
 # This is needed for debuggable spinlocks
 common_sources += $(introspection_sources)

@@ -26,6 +26,7 @@
 #include <MessageTaskNew.hpp>
 #include "MessageSatisfiability.hpp"
 #include <MessageAccessInfo.hpp>
+#include <MessageDataSend.hpp>
 #include <NodeNamespace.hpp>
 
 #include "cluster/WriteID.hpp"
@@ -147,8 +148,14 @@ namespace TaskOffloading {
 		task->setEarlyRelease(nanos6_no_wait);
 	}
 
-	void sendSatisfiabilityAndDataSends(SatisfiabilityInfoMap &satInfoMap, DataSendRegionInfoMap &regionInfoMap)
-	{
+	void sendSatisfiabilityAndDataSends(
+		SatisfiabilityInfoMap &satInfoMap,
+		DataSendRegionInfoMap &regionInfoMap
+	) {
+		if (!ClusterManager::getGroupMessagesEnabled()) {
+			assert(satInfoMap.empty());
+		}
+
 		if (satInfoMap.empty() && regionInfoMap.empty()) {
 			return;
 		}
@@ -159,7 +166,6 @@ namespace TaskOffloading {
 			MessageSatisfiability *msg = new MessageSatisfiability(it.second);
 			ClusterManager::sendMessage(msg, it.first);
 		}
-
 		satInfoMap.clear();
 
 		for (auto &it: regionInfoMap) {
@@ -167,7 +173,6 @@ namespace TaskOffloading {
 			MessageDataSend *msg = new MessageDataSend(it.second.size(), it.second);
 			ClusterManager::sendMessage(msg, it.first);
 		}
-
 		regionInfoMap.clear();
 	}
 
@@ -190,8 +195,7 @@ namespace TaskOffloading {
 			// This is called from the MessageSatisfiability::handleMessage.
 			// In Satisfiability messages the satInfo._id contains the remote task identifier (not the
 			// predecessor like in tasknew)
-			RemoteTaskInfo &taskInfo
-				= RemoteTasksInfoMap::getRemoteTaskInfo(satInfo._id);
+			RemoteTaskInfo &taskInfo = RemoteTasksInfoMap::getRemoteTaskInfo(satInfo._id);
 
 			taskInfo._lock.lock();
 			if (taskInfo._localTask == nullptr) {
@@ -352,8 +356,7 @@ namespace TaskOffloading {
 		task->setClusterContext(clusterContext);
 
 		// This is used only in the Namespace. The callback is called during the ClusterTaskContext
-		// destructor. And the ClusterTaskContext destructor is called during the ~Task
-		// when set.
+		// destructor. And the ClusterTaskContext destructor is called during the ~Task when set.
 		if (useCallbackInContext) {
 			assert(NodeNamespace::isEnabled());
 
@@ -362,9 +365,7 @@ namespace TaskOffloading {
 
 		// Register remote Task with TaskOffloading mechanism before
 		// submitting it to the dependency system
-		RemoteTaskInfo &remoteTaskInfo = RemoteTasksInfoMap::getRemoteTaskInfo(
-			remoteTaskIdentifier
-		);
+		RemoteTaskInfo &remoteTaskInfo = RemoteTasksInfoMap::getRemoteTaskInfo(remoteTaskIdentifier);
 
 		{
 			std::lock_guard<PaddedSpinLock<>> lock(remoteTaskInfo._lock);
@@ -392,7 +393,10 @@ namespace TaskOffloading {
 			// enable early release for accesses ("locally") propagated in the namespace
 			// and use delayed release for the ("non-local") accesses that require a
 			// message back to the offloader.
-			if (!task->mustDelayRelease() && !task->hasNowait() && !ClusterManager::getDisableAutowait()) {
+			if (!task->mustDelayRelease()
+				&& !task->hasNowait()
+				&& !ClusterManager::getDisableAutowait()) {
+
 				task->setEarlyRelease(nanos6_autowait);
 			}
 

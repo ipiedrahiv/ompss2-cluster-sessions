@@ -20,6 +20,10 @@
 #include "InstrumentCluster.hpp"
 #include "LiveDataTransfers.hpp"
 
+#include <cluster/messages/MessageId.hpp>
+#include <cluster/messages/MessageSatisfiability.hpp>
+
+
 namespace ExecutionWorkflow {
 
 	static inline TaskOffloading::DataSendRegionInfo handleEagerSend(
@@ -92,8 +96,14 @@ namespace ExecutionWorkflow {
 			ClusterNode *destNode = _task->getClusterContext()->getRemoteNode();
 
 			int eagerSendTag = 0;
-			if (_allowEagerSend && read && !access->getDisableEagerSend() && _namespacePredecessorNode != _targetMemoryPlace->getIndex()) {      // and not propagated in remote namespace
-				TaskOffloading::DataSendRegionInfo dataSendRegionInfo = handleEagerSend(region, location, _targetMemoryPlace);
+			if (_allowEagerSend
+				&& read
+				&& !access->getDisableEagerSend()
+				&& _namespacePredecessorNode != _targetMemoryPlace->getIndex()) { // and not propagated in remote namespace
+
+				TaskOffloading::DataSendRegionInfo dataSendRegionInfo
+					= handleEagerSend(region, location, _targetMemoryPlace);
+
 				eagerSendTag = dataSendRegionInfo._id;
 				if (eagerSendTag && location != ClusterManager::getCurrentMemoryNode()) {
 					// Queue the DataSendRegionInfo for a DataSend message
@@ -102,14 +112,22 @@ namespace ExecutionWorkflow {
 				}
 			}
 
-			OffloadedTaskIdManager::OffloadedTaskId offloadedTaskId = _task->getOffloadedTaskId();
-			satisfiabilityMap[destNode].push_back(
-				TaskOffloading::SatisfiabilityInfo(
-					region, locationIndex,
-					read, write,
-					access->isWeak(), access->getType(),
-					writeID, offloadedTaskId, eagerSendTag)
+			// Create the satinfo
+			TaskOffloading::SatisfiabilityInfo satInfo(
+				region, locationIndex,
+				read, write,
+				access->isWeak(), access->getType(),
+				writeID, _task->getOffloadedTaskId(), eagerSendTag
 			);
+
+			if (ClusterManager::getGroupMessagesEnabled()) {
+				// Group the messages to send latter
+				satisfiabilityMap[destNode].push_back(satInfo);
+			} else {
+				TaskOffloading::SatisfiabilityInfoVector satInfoVec(1, satInfo);
+				MessageSatisfiability *msg = new MessageSatisfiability(satInfoVec);
+				ClusterManager::sendMessage(msg, destNode);
+			}
 
 			size_t linkedBytes = region.getSize();
 

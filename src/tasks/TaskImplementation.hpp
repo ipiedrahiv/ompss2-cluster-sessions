@@ -170,7 +170,9 @@ inline bool Task::markAsFinished(ComputePlace *computePlace)
 		// All its children are completed, so the delayed release of
 		// dependencies has successfully completed
 		completeDelayedRelease();
-		DataAccessRegistration::handleExitTaskwait(this, computePlace, hpDependencyData);
+		DataAccessRegistration::handleExitTaskwait(
+			this, computePlace, hpDependencyData, false
+		);
 		markAsUnblocked();
 	}
 
@@ -188,7 +190,7 @@ inline bool Task::markAllChildrenAsFinished(ComputePlace *computePlace)
 
 	// Complete the delayed release of dependencies
 	completeDelayedRelease();
-	DataAccessRegistration::handleExitTaskwait(this, computePlace, hpDependencyData);
+	DataAccessRegistration::handleExitTaskwait(this, computePlace, hpDependencyData, false);
 	markAsUnblocked();
 
 	// Return whether all external events have been also fulfilled, so

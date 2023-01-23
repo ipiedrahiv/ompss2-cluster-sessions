@@ -18,6 +18,7 @@
 #include "MPIErrorHandler.hpp"
 #include "MessageId.hpp"
 
+#include <SlurmAPI.hpp>
 #include <ClusterManager.hpp>
 #include <ClusterNode.hpp>
 #include <MemoryAllocator.hpp>
@@ -39,7 +40,7 @@ void MPIMessenger::forEachDataPart(
 	int ofs = 0;
 
 #ifndef NDEBUG
-	const int nFragments = ClusterManager::getMPIFragments(DataAccessRegion(startAddress, size));
+	const int nFragments = this->getMessageFragments(DataAccessRegion(startAddress, size));
 #endif
 
 	while (currAddress < endAddress) {
@@ -187,19 +188,14 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 		abort();
 	}
 
-	//! Get the upper-bound tag supported by current MPI implementation
-	int ubIsSetFlag = 0, *mpi_ub_tag = nullptr;
-	ret = MPI_Comm_get_attr(MPI_COMM_WORLD, MPI_TAG_UB, &mpi_ub_tag, &ubIsSetFlag);
-	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
-	assert(mpi_ub_tag != nullptr);
-	assert(ubIsSetFlag != 0);
-
-	_mpi_ub_tag = convertToBitMask(*mpi_ub_tag);
-	assert(_mpi_ub_tag > 0);
+	int groupSize = 0;
+	ret = MPI_Comm_size(MPI_COMM_WORLD, &groupSize);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	assert(groupSize > 0);
 
 	// Set the error handler to MPI_ERRORS_RETURN so we can use a check latter.  The error handler
-	// is inherited by any created messenger latter, so we don't need to set it again.  TODO:
-	// Instead of checking on every MPI call we must define a propper MPI error handler.  The
+	// is inherited by any created messenger latter, so we don't need to set it again.
+	// TODO: Instead of checking on every MPI call we must define a propper MPI error handler.  The
 	// problem with this is that some parameters are implementation specific...
 	ret = MPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_RETURN);
 	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
@@ -208,8 +204,25 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 	ret = MPI_Comm_get_parent(&PARENT_COMM);
 	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
 
-	//! Create a new communicator
 	ConfigVariable<std::string> clusterSplitEnv("cluster.hybrid.split");
+	if (!clusterSplitEnv.isPresent()) {
+		// When there is not parent this is part of the initial communicator.
+		ret = MPI_Comm_dup(MPI_COMM_WORLD, &INTRA_COMM);
+		MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
+
+		char commname[MPI_MAX_OBJECT_NAME];
+		snprintf(commname, MPI_MAX_OBJECT_NAME - 1, "INTRA_WORLD_%s",
+			(PARENT_COMM != MPI_COMM_NULL ? "spawned" : "nospawned"));
+
+		ret = MPI_Comm_set_name(INTRA_COMM, commname);
+		MPIErrorHandler::handle(ret, INTRA_COMM);
+	}
+	// The first element in the vector is information about the current INTRA_COMM before any merge.
+	// WHen the process is not spawned then PARENT_COMM is MPI_COMM_NULL
+	commInfo info = {.intraComm = INTRA_COMM, .interComm = PARENT_COMM, .groupSize = groupSize};
+	_spawnedCommInfoStack.push(info);
+
+	//! Create a new communicator
 	if (PARENT_COMM == MPI_COMM_NULL) {
 
 		//! Calculate number of nodes and node number
@@ -220,10 +233,12 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 		ret = MPI_Comm_rank(MPI_COMM_WORLD, &_externalRank);
 
 		// When there is not parent it is part of the initial communicator.
-		if (clusterSplitEnv.isPresent()) {
+		if (clusterSplitEnv.isPresent() && clusterSplitEnv.getValue().length() > 0) {
+			// Run in hybrid MPI + OmpSs-2@Cluster mode
 			std::string clusterSplit = clusterSplitEnv.getValue();
 			splitCommunicator(clusterSplit);
 		} else {
+			// Run in pure OmpSs-2@Cluster mode
 			_apprankNum = 0;
 			_numAppranks = 1;
 			int n = _numExternalRanks / _numNodes;
@@ -232,31 +247,71 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 			}
 			_numInstancesThisNode = n;
 
-			for (int i=0; i<_numInstancesThisNode; i++) {
+			for (int i = 0; i < _numInstancesThisNode; ++i) {
 				bool isMasterInstance = (i==0) && (_physicalNodeNum==0); /* first instance on first node */
 				_isMasterThisNode.push_back(isMasterInstance);
 			}
 			_instrumentationRank = _externalRank;
-
-			//! Create a new communicator
-			ret = MPI_Comm_dup(MPI_COMM_WORLD, &INTRA_COMM);
 		}
 	} else {
+		FatalErrorHandler::failIf(
+			clusterSplitEnv.isPresent(),
+			"Malleability doesn't work with hybrid MPI+OmpSs-2@Cluster"
+		);
+
 		// This is a spawned process.
 		_apprankNum = 0;
 		_numAppranks = 1;
 		_numInstancesThisNode = 1; // Not used
 		_instrumentationRank = _externalRank;
+
+		// This is a spawned process, so merge with the parent communicator..
 		ret = MPI_Intercomm_merge(PARENT_COMM, true,  &INTRA_COMM);
-		FatalErrorHandler::failIf(clusterSplitEnv.isPresent(), "Malleability doesn't work with hybrid MPI+OmpSs-2@Cluster");
+		MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
 	}
+
+	//! Get the upper-bound tag supported by current MPI implementation
+	int ubIsSetFlag = 0, *mpi_ub_tag = nullptr;
+	ret = MPI_Comm_get_attr(INTRA_COMM, MPI_TAG_UB, &mpi_ub_tag, &ubIsSetFlag);
 	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
+	assert(mpi_ub_tag != nullptr);
+	assert(ubIsSetFlag != 0);
+
+	_mpi_ub_tag = convertToBitMask(*mpi_ub_tag);
+	assert(_mpi_ub_tag > 0);
 
 	// Get the user config to use a different communicator for data_raw.
 	ConfigVariable<bool> mpi_comm_data_raw("cluster.mpi.comm_data_raw");
 	_mpi_comm_data_raw = mpi_comm_data_raw.getValue();
 
-	this->internal_reset();
+	if (_mpi_comm_data_raw) {
+		ret = MPI_Comm_dup(INTRA_COMM, &INTRA_COMM_DATA_RAW);
+		MPIErrorHandler::handle(ret, INTRA_COMM_DATA_RAW);
+	} else {
+		INTRA_COMM_DATA_RAW = INTRA_COMM;
+	}
+
+	ret = MPI_Comm_rank(INTRA_COMM, &_wrank);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	assert(_wrank >= 0);
+
+	ret = MPI_Comm_size(INTRA_COMM, &_wsize);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	assert(_wsize > 0);
+
+	// The parent class already has a copy of _argc and _argv, but as MPI spawn has extra
+	// requirements, we use our local and keep the others untouched in case we implement other
+	// messengers in the future
+	EnvironmentVariable<std::string> envWrapper("NANOS6_WRAPPER");
+	if (envWrapper.isPresent()) {
+		spawnArgc = envWrapper.getValue();
+		spawnArgv = argv;
+	} else {
+		spawnArgc = argv[0];
+		spawnArgv = &argv[1];
+	}
+
+	this->shareDLBInfo();
 }
 
 
@@ -307,61 +362,63 @@ MPIMessenger::~MPIMessenger()
 #endif // NDEBUG
 }
 
-void MPIMessenger::internal_reset()
+void MPIMessenger::shareDLBInfo()
 {
-	int ret;
-	//! make sure the new communicator returns errors
-	if (_mpi_comm_data_raw) {
-		ret = MPI_Comm_dup(INTRA_COMM, &INTRA_COMM_DATA_RAW);
-		MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
-	} else {
-		INTRA_COMM_DATA_RAW = INTRA_COMM;
-	}
+	// Note: If the All gather pattern continues, then maybe it worth considering to use
+	// MPI_Iallgather with a waitall at the end of all to create a single synchronization point.
 
-	ret = MPI_Comm_rank(INTRA_COMM, &_wrank);
+	// Create the application communicator (Hybrid MPI+OmpSs applications)
+	int ret = MPI_Comm_split(MPI_COMM_WORLD, _wrank, _apprankNum, &APP_COMM);
 	MPIErrorHandler::handle(ret, INTRA_COMM);
-	assert(_wrank >= 0);
-
-	ret = MPI_Comm_size(INTRA_COMM, &_wsize);
-	MPIErrorHandler::handle(ret, INTRA_COMM);
-	assert(_wsize > 0);
-
-    // Create the application communicator
-    MPI_Comm_split(MPI_COMM_WORLD, _wrank, _apprankNum, &APP_COMM);
-    if (_wrank > 0) {
+	if (_wrank > 0) {
 		//! Invalid to use application communicator on slave nodes
 		APP_COMM = MPI_COMM_NULL;
-    }
+	}
 
 	// Create map from internal rank to external rank
-	int *allExternalRanks = new int[_wsize];
-	MPI_Allgather(&_externalRank, 1, MPI_INT, allExternalRanks, 1, MPI_INT, INTRA_COMM);
 	_internalRankToExternalRank.resize(_wsize);
-	for (int i=0; i<_wsize; i++) {
-		_internalRankToExternalRank[i] = allExternalRanks[i];
-	}
-	delete[] allExternalRanks;
+	ret = MPI_Allgather(
+		&_externalRank, 1, MPI_INT,
+		_internalRankToExternalRank.data(), 1, MPI_INT, INTRA_COMM
+	);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
 
-	// Create map from number on node to external rank
-	MPI_Comm tempNodeComm;
-	allExternalRanks = new int[_numInstancesThisNode];
-	MPI_Comm_split(MPI_COMM_WORLD, /* color */ _physicalNodeNum, /* key */ _indexThisPhysicalNode, &tempNodeComm);
-	MPI_Allgather(&_externalRank, 1, MPI_INT, allExternalRanks, 1, MPI_INT, tempNodeComm);
+	// This node to external rank
 	_instanceThisNodeToExternalRank.resize(_numInstancesThisNode);
-	for (int i=0; i<_numInstancesThisNode; i++) {
-		_instanceThisNodeToExternalRank[i] = allExternalRanks[i];
-		// std::cout << "Extrank " << _externalRank << " instance " << i << "on node: " << _instanceThisNodeToExternalRank[i] << "\n";
-	}
-	delete[] allExternalRanks;
+	MPI_Comm tempNodeComm;
+	ret = MPI_Comm_split(
+		MPI_COMM_WORLD,
+		/* color */ _physicalNodeNum,
+		/* key */ _indexThisPhysicalNode,
+		&tempNodeComm
+	);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
 
-	// Create map from internal rank to instrumentation rank
-	int *allInstrumentationRanks = new int[_wsize];
-	MPI_Allgather(&_instrumentationRank, 1, MPI_INT, allInstrumentationRanks, 1, MPI_INT, INTRA_COMM);
+#ifndef NDEBUG
+	// This is a defensive check to assert that the next operation does not produce overflow...
+	// you know there are never not enough assertions
+	int checksize = 0;
+	ret = MPI_Comm_size(tempNodeComm, &checksize);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	assert(checksize == _numInstancesThisNode);
+#endif // NDEBUG
+
+	// External Rank
+	ret = MPI_Allgather(
+		&_externalRank, 1, MPI_INT,
+		_instanceThisNodeToExternalRank.data(), 1, MPI_INT, tempNodeComm
+	);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+
+	// Internal rank
 	_internalRankToInstrumentationRank.resize(_wsize);
-	for (int i=0; i<_wsize; i++) {
-		_internalRankToInstrumentationRank[i] = allInstrumentationRanks[i];
-	}
-	delete[] allInstrumentationRanks;
+	ret = MPI_Allgather(
+		&_instrumentationRank, 1, MPI_INT,
+		_internalRankToInstrumentationRank.data(), 1, MPI_INT, INTRA_COMM
+	);
+
+	ret = MPI_Comm_free(&tempNodeComm);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
 }
 
 void MPIMessenger::sendMessage(Message *msg, ClusterNode const *toNode, bool block)
@@ -485,7 +542,8 @@ DataTransfer *MPIMessenger::fetchData(
 	void *address = region.getStartAddress();
 	size_t size = region.getSize();
 
-	assert(mpiSrc < _wsize && mpiSrc != _wrank);
+	assert(mpiSrc < _wsize);
+	assert(mpiSrc != _wrank);
 
 	if (block) {
 		Instrument::MPILock();
@@ -542,6 +600,20 @@ void MPIMessenger::synchronizeAll(void)
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 }
 
+void MPIMessenger::abortAll(int errcode)
+{
+	// TODO: This is a partial solution to reduce the real issue. If this failure happens in a
+	// remote process (not master) then the job is not killed because only master knows about the
+	// allocations and master will die with MPI_Abort. 
+	if (SlurmAPI::isEnabled()) {
+		SlurmAPI::killJobRequestIfPending();
+	}
+
+	std::lock_guard<SpinLock> guard(_abortLock);
+	MPI_Abort(INTRA_COMM, errcode);
+}
+
+
 Message *MPIMessenger::checkMail(void)
 {
 	int ret, flag, count;
@@ -550,7 +622,7 @@ Message *MPIMessenger::checkMail(void)
 	Instrument::MPILock();
 	ret = MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, INTRA_COMM, &flag, &status);
 	Instrument::MPIUnLock();
-	MPIErrorHandler::handle(ret, INTRA_COMM);
+	MPIErrorHandler::handle(ret, INTRA_COMM, "Pooling MPI_Iprobe");
 
 	if (!flag) {
 		return nullptr;
@@ -675,4 +747,143 @@ void MPIMessenger::waitAllCompletion(std::vector<TransferBase *> &pendings)
 void MPIMessenger::summarizeSplit() const
 {
 	Instrument::summarizeSplit(_externalRank, _physicalNodeNum, _apprankNum);
+}
+
+void MPIMessenger::messengerReinitialize(bool willdie)
+{
+	int ret;
+	//! make sure the new communicator returns errors
+	if (_mpi_comm_data_raw) {
+		MPI_Comm_free(&INTRA_COMM_DATA_RAW);
+		ret = MPI_Comm_dup(INTRA_COMM, &INTRA_COMM_DATA_RAW);
+		MPIErrorHandler::handle(ret, INTRA_COMM);
+	} else {
+		INTRA_COMM_DATA_RAW = INTRA_COMM;
+	}
+
+	if (willdie) {
+		return;
+	}
+
+	int newrank = -1, newsize = -1;;
+	ret = MPI_Comm_rank(INTRA_COMM, &newrank);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	assert(newrank == _wrank);
+
+	ret = MPI_Comm_size(INTRA_COMM, &newsize);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	_wsize = newsize;
+}
+
+int MPIMessenger::messengerSpawn(int delta, std::string hostname)
+{
+	assert(delta > 0);
+	MPI_Comm newinter = MPI_COMM_NULL;               // Temporal intercomm
+	MPI_Comm newintra = MPI_COMM_NULL;               // Temporal intracomm
+
+	int ret = 0;
+
+	MPI_Info info = MPI_INFO_NULL;
+	if (!hostname.empty() && _wrank == 0) {
+		ret = MPI_Info_create(&info);
+		MPIErrorHandler::handle(ret, INTRA_COMM);
+
+		ret = MPI_Info_set(info, "host", hostname.c_str());
+		MPIErrorHandler::handle(ret, INTRA_COMM);
+	}
+
+	int errcode = 0;
+	ret = MPI_Comm_spawn(
+		spawnArgc.c_str(), spawnArgv, delta, info, 0, INTRA_COMM, &newinter, &errcode
+	);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	FatalErrorHandler::failIf(errcode != MPI_SUCCESS, "New process returned error code: ", errcode);
+
+	ret = MPI_Intercomm_merge(newinter, false, &newintra); // Create new intra
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+
+	commInfo comm_info = {.intraComm = INTRA_COMM, .interComm = newinter, .groupSize = delta};
+	_spawnedCommInfoStack.push(comm_info);
+
+	INTRA_COMM = newintra;
+
+	// This is commented to go around the Intel issue with MPI_Comm_spawn; it seems like intel frees
+	// the info internal content in the MPI_Comm_spawn; somehow the info cannot be used after the
+	// spawn either to access or to release.
+	// if (info != MPI_INFO_NULL) {
+	// 	ret = MPI_Info_free(&info);
+	// 	MPIErrorHandler::handle(ret, INTRA_COMM);
+	// }
+
+	__attribute__((unused)) const int oldsize = _wsize;
+	messengerReinitialize(false);
+	assert(_wsize == oldsize + delta);                       // New size needs to be bigger
+
+	char commname[MPI_MAX_OBJECT_NAME];
+	snprintf(commname, MPI_MAX_OBJECT_NAME - 1, "INTRA_%d_%d", _wrank, _wsize);
+
+	ret = MPI_Comm_set_name(INTRA_COMM, commname);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+
+	return _wsize;
+}
+
+int MPIMessenger::messengerShrink(int delta)
+{
+	assert(delta < 0);
+
+	const int newsize = _wsize + delta;
+	FatalErrorHandler::failIf(newsize < 1, "Can't resize below current number of nodes.");
+
+	const int willdie = (_wrank >= newsize);
+	FatalErrorHandler::failIf(willdie && !isSpawned(), "Can't shrink a non-spawned process.");
+
+	int ret, currsize = _wsize;
+
+	while (currsize > newsize && _spawnedCommInfoStack.size() > 0) {
+
+#ifndef NDEBUG
+		{   // Assert we don't have any pending message in the communicator.
+			int flag;
+			MPI_Status status;
+
+			ret = MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, INTRA_COMM, &flag, &status);
+			MPIErrorHandler::handle(ret, INTRA_COMM, "Debug MPI_Iprobe");
+
+			FatalErrorHandler::failIf(flag,
+				"Pending messages in a communicator that will be removed: type ",
+				MessageTypeStr[status.MPI_TAG & 0xff], " from ", status.MPI_SOURCE);
+		}
+#endif // NDEBUG
+		struct commInfo &spawnedCommInfo = _spawnedCommInfoStack.top();
+
+		FatalErrorHandler::failIf(_spawnedCommInfoStack.size() == 1
+			&& spawnedCommInfo.interComm == MPI_COMM_NULL,
+			"Can't shrink when there are no spawned processes.");
+
+		FatalErrorHandler::failIf(currsize - newsize < spawnedCommInfo.groupSize,
+			"Can't shrink incomplete communicator.");
+
+		ret = MPI_Comm_free(&INTRA_COMM);                      // Free old intracomm before.
+		INTRA_COMM = spawnedCommInfo.intraComm;                // Use the next in the stack
+		MPIErrorHandler::handle(ret, INTRA_COMM);
+
+		ret = MPI_Comm_disconnect(&spawnedCommInfo.interComm); // disconnect the inter communicator
+		MPIErrorHandler::handle(ret, INTRA_COMM);
+
+		currsize -= spawnedCommInfo.groupSize;
+
+		// We can remove the entire group and continue iterating.
+		_spawnedCommInfoStack.pop();
+	}
+
+	messengerReinitialize(willdie);
+
+	if (willdie) {
+		assert(_spawnedCommInfoStack.empty());
+		return 0;
+	}
+
+	assert(newsize == _wsize);
+	return _wsize;
 }

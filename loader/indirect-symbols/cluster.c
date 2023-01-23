@@ -258,3 +258,67 @@ int nanos6_get_app_communicator(void *appcomm)
 
 	return (*symbol)(appcomm);
 }
+
+int nanos6_cluster_resize(int delta)
+{
+	typedef int nanos6_cluster_resize_t(int);
+
+	static nanos6_cluster_resize_t *symbol = NULL;
+	if (__builtin_expect(symbol == NULL, 0)) {
+		symbol = (nanos6_cluster_resize_t *) _nanos6_resolve_symbol(
+			"nanos6_cluster_resize", "cluster", NULL);
+	}
+
+	return (*symbol)(delta);
+}
+
+int nanos6_cluster_resize_with_policy(int delta, nanos6_spawn_policy_t policy)
+{
+	typedef int nanos6_cluster_resize_with_policy_t(int, nanos6_spawn_policy_t);
+
+	static nanos6_cluster_resize_with_policy_t *symbol = NULL;
+	if (__builtin_expect(symbol == NULL, 0)) {
+		symbol = (nanos6_cluster_resize_with_policy_t *) _nanos6_resolve_symbol(
+			"nanos6_cluster_resize_with_policy", "cluster", NULL);
+	}
+
+	return (*symbol)(delta, policy);
+}
+
+int nanos6_serialize(void *start, size_t nbytes, size_t process, size_t id, int checkpoint)
+{
+	typedef int nanos6_serialize_t(void *, size_t, size_t, size_t, int);
+
+	static nanos6_serialize_t *symbol = NULL;
+	if (__builtin_expect(symbol == NULL, 0)) {
+		symbol = (nanos6_serialize_t *) _nanos6_resolve_symbol("nanos6_serialize", "cluster", NULL);
+	}
+
+	return (*symbol)(start, nbytes, process, id, checkpoint);
+}
+
+int nanos6_fail(const char message[])
+{
+	typedef int nanos6_fail_t(const char *);
+
+	static nanos6_fail_t *symbol = NULL;
+	if (__builtin_expect(symbol == NULL, 0)) {
+		symbol = (nanos6_fail_t *) _nanos6_resolve_symbol("nanos6_fail", "cluster", NULL);
+	}
+
+	(*symbol)(message);
+}
+
+int nanos6_get_cluster_info(nanos6_cluster_info_t *info)
+{
+	typedef int nanos6_get_cluster_info_t(nanos6_cluster_info_t *info);
+
+	static nanos6_get_cluster_info_t *symbol = NULL;
+	if (__builtin_expect(symbol == NULL, 0)) {
+		symbol = (nanos6_get_cluster_info_t *) _nanos6_resolve_symbol(
+			"nanos6_get_cluster_info", "cluster", NULL);
+	}
+
+	(*symbol)(info);
+}
+

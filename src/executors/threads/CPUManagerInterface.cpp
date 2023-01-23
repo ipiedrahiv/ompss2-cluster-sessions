@@ -9,12 +9,12 @@
 
 #include "CPUManagerInterface.hpp"
 #include "system/RuntimeInfo.hpp"
-
+#include "cluster/ClusterManager.hpp"
 
 std::vector<CPU *> CPUManagerInterface::_cpus;
 std::vector<size_t> CPUManagerInterface::_systemToVirtualCPUId;
 cpu_set_t CPUManagerInterface::_cpuMask;
-std::atomic<bool> CPUManagerInterface::_finishedCPUInitialization;
+std::atomic<bool> CPUManagerInterface::_finishedCPUInitialization(false);
 ConfigVariable<size_t> CPUManagerInterface::_taskforGroups("taskfor.groups");
 ConfigVariable<bool> CPUManagerInterface::_taskforGroupsReportEnabled("taskfor.report");
 CPUManagerPolicyInterface *CPUManagerInterface::_cpuManagerPolicy;
@@ -23,38 +23,58 @@ size_t CPUManagerInterface::_firstCPUId;
 CPU *CPUManagerInterface::_leaderThreadCPU = nullptr;
 bool CPUManagerInterface::_reserveCPUforLeaderThread = false;
 
-namespace cpumanager_internals {
-	static inline std::string maskToRegionList(boost::dynamic_bitset<> const &mask, size_t size)
-	{
-		std::ostringstream oss;
+static std::string maskToRegionList(boost::dynamic_bitset<> const &mask, size_t size)
+{
+	std::ostringstream oss;
 
-		int start = -1;
-		int end = -1;
-		bool first = true;
-		for (size_t i = 0; i < size + 1; i++) {
-			if ((i < size) && mask[i]) {
-				if (start == -1) {
-					start = i;
-				}
-				end = i;
-			} else if (end >= 0) {
-				if (first) {
-					first = false;
-				} else {
-					oss << ",";
-				}
-				if (end == start) {
-					oss << start;
-				} else {
-					oss << start << "-" << end;
-				}
-				start = -1;
-				end = -1;
+	int start = -1;
+	int end = -1;
+	bool first = true;
+	for (size_t i = 0; i < size + 1; i++) {
+		if ((i < size) && mask[i]) {
+			if (start == -1) {
+				start = i;
 			}
+			end = i;
+		} else if (end >= 0) {
+			if (first) {
+				first = false;
+			} else {
+				oss << ",";
+			}
+			if (end == start) {
+				oss << start;
+			} else {
+				oss << start << "-" << end;
+			}
+			start = -1;
+			end = -1;
 		}
-
-		return oss.str();
 	}
+
+	return oss.str();
+}
+
+CPUManagerInterface::CPUManagerInterface()
+{
+	assert(_reserveCPUforLeaderThread == false);
+	assert(_finishedCPUInitialization == false);
+
+	ConfigVariable<bool> configReserveCPULeader("cpumanager.reserve_cpu_leader");
+
+	// In cluster mode, the LeaderThread is necessary, otherwise the polling services (which manage
+	// communication with other nodes) may not be run frequently enough, causing a high latency on
+	// communications. This has been observed to be a problem in test cases. But the LeaderThread
+	// normally overallocates a CPU, which means that it can preempt a worker thread that is holding
+	// the scheduler lock. In this case, no new tasks can be scheduled until all the messages have
+	// been handled.  Therefore, in cluster mode or malleable executions, leave one CPU free to be
+	// used by the LeaderThread.
+	if (configReserveCPULeader.getValue()
+		&& (ClusterManager::inClusterMode()
+			|| ClusterManager::getInitData().clusterMalleabilityEnabled())) {
+		_reserveCPUforLeaderThread = true;
+	}
+
 }
 
 void CPUManagerInterface::reportInformation(size_t numSystemCPUs, size_t numNUMANodes)
@@ -79,14 +99,14 @@ void CPUManagerInterface::reportInformation(size_t numSystemCPUs, size_t numNUMA
 	RuntimeInfo::addEntry(
 		"initial_cpu_list",
 		"Initial CPU List",
-		cpumanager_internals::maskToRegionList(processCPUMask, numSystemCPUs)
+		maskToRegionList(processCPUMask, numSystemCPUs)
 	);
 	for (size_t i = 0; i < numNUMANodes; ++i) {
 		std::ostringstream oss, oss2;
 
 		oss << "numa_node_" << i << "_cpu_list";
 		oss2 << "NUMA Node " << i << " CPU List";
-		std::string cpuRegionList = cpumanager_internals::maskToRegionList(NUMANodeSystemMask[i], numSystemCPUs);
+		std::string cpuRegionList = maskToRegionList(NUMANodeSystemMask[i], numSystemCPUs);
 
 		RuntimeInfo::addEntry(oss.str(), oss2.str(), cpuRegionList);
 	}

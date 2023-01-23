@@ -51,21 +51,8 @@ public:
 
 	static bool check(
 		std::function<bool(DataTransfer *)> checkPending,
-		std::function<DataTransfer *()> createNew)
-	{
-		std::lock_guard<PaddedSpinLock<>> guard(_lock);
-		for(DataTransfer *dataTransfer : _liveDataTransfers) {
-			bool done = checkPending(dataTransfer);
-			if (done) {
-				/* Return done flag */
-				return true;
-			}
-		}
-		/* Return not done */
-		DataTransfer *dataTransferNew = createNew();
-		LiveDataTransfers::addUnlocked(dataTransferNew);
-		return false;
-	}
+		std::function<DataTransfer *()> createNew
+	);
 };
 
 #endif /* LIVE_DATA_TRANSFERS_HPP */

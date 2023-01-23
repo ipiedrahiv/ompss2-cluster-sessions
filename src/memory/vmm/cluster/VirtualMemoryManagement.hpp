@@ -7,58 +7,99 @@
 #ifndef __VIRTUAL_MEMORY_MANAGEMENT_HPP__
 #define __VIRTUAL_MEMORY_MANAGEMENT_HPP__
 
+#include "cluster/ClusterManager.hpp"
 #include "memory/vmm/VirtualMemoryArea.hpp"
+#include <ClusterNode.hpp>
+#include <Directory.hpp>
 
 #include <vector>
 
 class VirtualMemoryManagement {
 public:
+	static std::vector<DataAccessRegion> findMappedRegions(size_t ngaps);
+	static DataAccessRegion findSuitableMemoryRegion();
+
 	// Subclass allocation; only needed and used here
 	class VirtualMemoryAllocation : public DataAccessRegion
 	{
-	public:
-		VirtualMemoryAllocation(void *address, size_t size) : DataAccessRegion(address, size)
+	private:
+		static bool IsUsableMemoryRegion(const DataAccessRegion &region)
 		{
-			FatalErrorHandler::failIf(size == 0, "Virtual memory constructor receive a zero size.");
+			std::vector<DataAccessRegion> maps = VirtualMemoryManagement::findMappedRegions(1);
+			const size_t length = maps.size();
 
-			/** For the moment we are using fixed memory protection and allocation flags, but in the
-			 * future we could make those arguments fields of the class */
-			const int prot = PROT_READ|PROT_WRITE;
-			int flags = MAP_ANONYMOUS|MAP_PRIVATE|MAP_NORESERVE;
+			// Find the biggest gap locally
+			for (size_t i = 1; i < length; ++i) {
+				void *previousEnd = maps[i - 1].getEndAddress();
+				void *nextStart = maps[i].getStartAddress();
 
-			if (address != nullptr) {
-				flags |= MAP_FIXED;
+				if (previousEnd >= nextStart                    // This should never happen
+					|| previousEnd > region.getEndAddress()) {  // Too early range
+					continue;
+				}
+
+				DataAccessRegion gapRegion(previousEnd, nextStart);
+
+				if (region.fullyContainedIn(gapRegion)) {
+					return true;
+				}
 			}
-			void *ret = mmap(address, size, prot, flags, -1, 0);
+
+			return false;
+		}
+
+	public:
+		VirtualMemoryAllocation(DataAccessRegion const &totalRegion) : DataAccessRegion(totalRegion)
+		{
+			FatalErrorHandler::failIf(totalRegion.getStartAddress() == nullptr,
+				"Virtual memory constructor received a null start address");
+			FatalErrorHandler::failIf(totalRegion.getSize() == 0,
+				"Virtual memory constructor received a zero size");
+			FatalErrorHandler::failIf(IsUsableMemoryRegion(totalRegion) ==  false,
+				"The region: ", totalRegion, " is already mapped, so not usable.");
+
+			// For the moment we are using fixed memory protection and allocation flags, but in the
+			// future we could make those arguments fields of the class
+			constexpr int prot = PROT_READ|PROT_WRITE;
+			constexpr int flags = MAP_ANONYMOUS|MAP_PRIVATE|MAP_NORESERVE|MAP_FIXED;
+
+			const void *ret = mmap(this->getStartAddress(), this->getSize(), prot, flags, -1, 0);
 
 			FatalErrorHandler::failIf(ret == MAP_FAILED,
 				"mapping virtual address space failed. errno: ", errno);
-			FatalErrorHandler::failIf(ret != address,
+			FatalErrorHandler::failIf(ret != this->getStartAddress(),
 				"mapping virtual address space couldn't use address hint");
 		}
+
+		//! Virtual allocations should be unique, so can't copy
+		VirtualMemoryAllocation(VirtualMemoryAllocation const &) = delete;
+		VirtualMemoryAllocation operator=(VirtualMemoryAllocation const &) = delete;
 
 		~VirtualMemoryAllocation()
 		{
 			const int ret = munmap(this->getStartAddress(), this->getSize());
 			FatalErrorHandler::failIf(ret != 0, "Could not unmap memory allocation");
 		}
-	};
+
+	}; // class VirtualMemoryAllocation
 
 private:
 	//! memory allocations from OS
-	std::vector<VirtualMemoryManagement::VirtualMemoryAllocation *> _allocations;
+	VirtualMemoryManagement::VirtualMemoryAllocation const * const _allocation = nullptr;
+
+	VirtualMemoryArea * _distributedVirtualRegion;
+	const size_t _localSizePerNode;
 
 	//! addresses for local NUMA allocations
 	std::vector<VirtualMemoryArea *> _localNUMAVMA;
 
-	//! addresses for generic allocations
-	VirtualMemoryArea *_genericVMA;
+	static ClusterManager::DataInitSpawn const &setupInitData();
 
 	//! Setting up the memory layout
-	void setupMemoryLayout(void *address, size_t distribSize, size_t localSize);
+	void setupMemoryLayout();
 
 	//! private constructor, this is a singleton.
-	VirtualMemoryManagement();
+	VirtualMemoryManagement(const ClusterManager::DataInitSpawn &initData);
 
 	~VirtualMemoryManagement();
 
@@ -68,9 +109,13 @@ public:
 
 	static inline void initialize()
 	{
+		const ClusterManager::DataInitSpawn &initData = VirtualMemoryManagement::setupInitData();
+
 		assert(_singleton == nullptr);
-		_singleton = new VirtualMemoryManagement();
+		_singleton = new VirtualMemoryManagement(initData);
 		assert(_singleton != nullptr);
+
+		_singleton->setupMemoryLayout();
 	}
 
 	static inline void shutdown()
@@ -78,6 +123,32 @@ public:
 		assert(_singleton != nullptr);
 		delete _singleton;
 		_singleton = nullptr;
+	}
+
+	static void registerNodeLocalRegion(const ClusterNode *node)
+	{
+		assert(_singleton != nullptr);
+		// TODO: add some assertion here to check the region is nor already registered.
+		char *ptr = ((char *)_singleton->_allocation->getStartAddress()
+			+ _singleton->_localSizePerNode * node->getIndex());
+
+		DataAccessRegion tmpRegion((void *)ptr, _singleton->_localSizePerNode);
+		assert(tmpRegion.getEndAddress() <= _singleton->_distributedVirtualRegion->getStartAddress());
+
+		Directory::insert(tmpRegion, node->getMemoryNode());
+	}
+
+	static void unregisterNodeLocalRegion(const ClusterNode *node)
+	{
+		assert(_singleton != nullptr);
+		// TODO: add some assertion here to check the region is nor already registered.
+		char *ptr = ((char *)_singleton->_allocation->getStartAddress()
+			+ _singleton->_localSizePerNode * node->getIndex());
+
+		DataAccessRegion tmpRegion((void *)ptr, _singleton->_localSizePerNode);
+		assert(tmpRegion.getEndAddress() <= _singleton->_distributedVirtualRegion->getStartAddress());
+
+		Directory::erase(tmpRegion);
 	}
 
 	/** allocate a block of generic addresses.
@@ -89,7 +160,7 @@ public:
 	static inline void *allocDistrib(size_t size)
 	{
 		assert(_singleton != nullptr);
-		return _singleton->_genericVMA->allocBlock(size);
+		return _singleton->_distributedVirtualRegion->allocBlock(size);
 	}
 
 	/** allocate a block of local addresses on a NUMA node.
@@ -101,6 +172,8 @@ public:
 	{
 		assert(_singleton != nullptr);
 		VirtualMemoryArea *vma = _singleton->_localNUMAVMA.at(NUMAId);
+		assert(vma != nullptr);
+
 		return vma->allocBlock(size);
 	}
 
@@ -110,11 +183,10 @@ public:
 	{
 		assert(_singleton != nullptr);
 		for (size_t i = 0; i < _singleton->_localNUMAVMA.size(); ++i) {
-			if (_singleton->_localNUMAVMA[i]->includesAddress(ptr)) {
+			if (_singleton->_localNUMAVMA[i]->containsAddress(ptr)) {
 				return i;
 			}
 		}
-
 		//! Non-NUMA allocation
 		return _singleton->_localNUMAVMA.size();
 	}
@@ -127,7 +199,7 @@ public:
 	static inline bool isDistributedRegion(DataAccessRegion const &region)
 	{
 		assert(_singleton != nullptr);
-		return _singleton->_genericVMA->includesRange(region.getStartAddress(), region.getSize());
+		return _singleton->_distributedVirtualRegion->fullyContainsRegion(region);
 	}
 
 	//! \brief Check if a memory region is (cluster) local memory
@@ -139,7 +211,10 @@ public:
 	{
 		assert(_singleton != nullptr);
 		for (const auto &it : _singleton->_localNUMAVMA) {
-			if (it->includesRange(region.getStartAddress(), region.getSize())) {
+			// TODO: I think there is a bug here. a region could be crossing boundaries between two
+			// contiguous numa nodes; so fullyContainsRegion will return false in spite of it is
+			// local.
+			if (it->fullyContainsRegion(region)) {
 				return true;
 			}
 		}
@@ -155,12 +230,6 @@ public:
 	static inline bool isClusterMemory(DataAccessRegion const &region)
 	{
 		return isDistributedRegion(region) || isLocalRegion(region);
-	}
-
-	static inline std::vector<VirtualMemoryManagement::VirtualMemoryAllocation *> getAllocations()
-	{
-		assert(_singleton != nullptr);
-		return _singleton->_allocations;
 	}
 
 };

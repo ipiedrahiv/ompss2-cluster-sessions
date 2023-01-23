@@ -64,6 +64,7 @@ namespace ClusterPollingServices {
 		{
 			switch(msg->getType()) {
 				case DMALLOC:
+				case DMALLOC_INFO:
 				case DFREE:
 				case DATA_FETCH:
 				case DATA_SEND: // Not sure whether worth offloading to workers as just an MPI call
@@ -92,6 +93,8 @@ namespace ClusterPollingServices {
 				break;
 
 				case SYS_FINISH:
+				case SHRINK:
+				case SPAWN:
 					// * These messages are the last ones to be processes... they must be the last
 					// * of all to be handled ones
 					assert(_nonStealableLowPriorityMessage == nullptr);
@@ -168,6 +171,7 @@ namespace ClusterPollingServices {
 			switch (msg->getType()) {
 				case SYS_FINISH:
 				case DMALLOC:
+				case DMALLOC_INFO:
 				case DFREE:
 				case DATA_FETCH:
 				case DATA_SEND:
@@ -175,6 +179,8 @@ namespace ClusterPollingServices {
 				case SATISFIABILITY:
 				case RELEASE_ACCESS_AND_FINISH:
 				case TASK_FINISHED:
+				case SHRINK:
+				case SPAWN:
 					// These messages have no ordering constraints, so do nothing
 					break;
 
@@ -261,11 +267,13 @@ namespace ClusterPollingServices {
 			}
 
 			T *msg = nullptr;
+			Messenger *msn = ClusterManager::getMessenger();
+			assert(msn != nullptr);
 
 			if (_singleton._numWorkers == 0) {
 				// No other worker tasks, so handle the messages right away and sequentially here
 				// (more efficient than below)
-				while ((msg = ClusterManager::checkMail()) != nullptr) {
+				while ((msg = msn->checkMail()) != nullptr) {
 					handleMessageWrapper(msg, true);
 				};
 
@@ -273,7 +281,7 @@ namespace ClusterPollingServices {
 				// At least one other worker, so let other threads steal messages
 				while (true) {
 					// First take all the messages (from the Messenger)
-					while ((msg = ClusterManager::checkMail()) != nullptr) {
+					while ((msg = msn->checkMail()) != nullptr) {
 						// Queue the message, taking account of ordering constraints
 						_singleton.queueMessage(msg);
 					}
@@ -340,7 +348,7 @@ namespace ClusterPollingServices {
 		{
 			assert(_singleton._numStolen == 0);
 			assert(_singleton._live.load() == true);
-			_singleton._live = false;
+			_singleton._live.store(false);
 		}
 	};
 

@@ -10,7 +10,6 @@
 #include <regex>
 
 #include "VirtualMemoryManagement.hpp"
-#include "cluster/ClusterManager.hpp"
 #include "cluster/messages/MessageId.hpp"
 #include "hardware/HardwareInfo.hpp"
 #include "hardware/cluster/ClusterNode.hpp"
@@ -20,7 +19,6 @@
 #include "system/RuntimeInfo.hpp"
 
 #include <DataAccessRegion.hpp>
-#include <Directory.hpp>
 
 VirtualMemoryManagement *VirtualMemoryManagement::_singleton = nullptr;
 
@@ -30,7 +28,7 @@ VirtualMemoryManagement *VirtualMemoryManagement::_singleton = nullptr;
 //! process.
 //!
 //! \returns a vector of DataAccessRegion objects describing the mappings
-static std::vector<DataAccessRegion> findMappedRegions()
+std::vector<DataAccessRegion> VirtualMemoryManagement::findMappedRegions(size_t ngaps)
 {
 	std::vector<DataAccessRegion> maps;
 
@@ -61,7 +59,7 @@ static std::vector<DataAccessRegion> findMappedRegions()
 				// Add an extra padding to the end of the heap.
 				// This avoids the nasty memory error we had long time ago.
 				if (submatch[3].str() == "[heap]") {
-					endAddress += HardwareInfo::getPhysicalMemorySize();
+					endAddress += (ngaps * HardwareInfo::getPhysicalMemorySize());
 				}
 
 				maps.emplace_back((void *)startAddress, (void *)endAddress);
@@ -87,9 +85,9 @@ static std::vector<DataAccessRegion> findMappedRegions()
 //!
 //! \returns an available memory region to map Nanos6 memory, or an empty region
 //!          if none available
-static DataAccessRegion findSuitableMemoryRegion()
+DataAccessRegion VirtualMemoryManagement::findSuitableMemoryRegion()
 {
-	std::vector<DataAccessRegion> maps = findMappedRegions();
+	std::vector<DataAccessRegion> maps = VirtualMemoryManagement::findMappedRegions(2);
 	const size_t length = maps.size();
 	DataAccessRegion gap;
 
@@ -108,8 +106,9 @@ static DataAccessRegion findSuitableMemoryRegion()
 		}
 	}
 
-	// If not in cluster mode, we are done here
-	if (!ClusterManager::inClusterMode()) {
+	// If not in cluster mode and malleability is disabled, we are done here
+	if (!ClusterManager::inClusterMode()
+		&& ClusterManager::getInitData().clusterMalleabilityEnabled() == false) {
 		return gap;
 	}
 
@@ -149,57 +148,99 @@ static DataAccessRegion findSuitableMemoryRegion()
 		MemoryPlace *masterMemory = ClusterManager::getMasterNode()->getMemoryNode();
 
 		// First send my local gap to master node
-		ClusterManager::sendDataRaw(buffer, masterMemory, 0, /* block */ true, /* instrument */ false);
+		ClusterManager::sendDataRaw(buffer, masterMemory, 0, true, false);
 
 		// Then receive the intersection of all gaps
-		ClusterManager::fetchDataRaw(buffer, masterMemory, 0, /* block */ true, /* instrument */ false);
+		ClusterManager::fetchDataRaw(buffer, masterMemory, 0, true, false);
 	}
 
 	return gap;
 }
 
-VirtualMemoryManagement::VirtualMemoryManagement()
+
+const ClusterManager::DataInitSpawn &VirtualMemoryManagement::setupInitData()
 {
-	// The cluster.distributed_memory variable determines the total address space to be
-	// used for distributed allocations across the cluster The efault value is 2GB
-	ConfigVariable<StringifiedMemorySize> distribSizeEnv("cluster.distributed_memory");
-	size_t distribSize = distribSizeEnv.getValue();
-	assert(distribSize > 0);
-	distribSize = ROUND_UP(distribSize, HardwareInfo::getPageSize());
+	// This function is called BEFORE the constructor. It actually may be in the ClusterManager, But
+	// I implemented it here because it handles memory stuff.
+	assert(_singleton == nullptr);
 
-	// The cluster.local_memory variable determines the size of the local address space
-	// per cluster node. The default value is the minimum between 2GB and the 5% of the
-	// total physical memory of the machine
-	ConfigVariable<StringifiedMemorySize> localSizeEnv("cluster.local_memory");
-	size_t localSize = localSizeEnv.getValue();
-	if (localSize == 0) {
-		FatalErrorHandler::warn("cluster.local_memory not from toml.");
-		const size_t totalMemory = HardwareInfo::getPhysicalMemorySize();
-		localSize = std::min(2UL << 30, totalMemory / 20);
+	// Get the maximum size, when zero malleability is disabled, when numeric limit something is
+	// wrong. If malleability is disabled then use the current cluster size.
+	ClusterManager::DataInitSpawn &initData = ClusterManager::getInitData();
+
+	if (initData._virtualAllocation.empty()) {
+		assert(initData._virtualDistributedRegion.empty());
+
+		// The cluster.local_memory variable determines the size of the local address space
+		// per cluster node. The default value is the minimum between 2GB and the 5% of the
+		// total physical memory of the machine
+		ConfigVariable<StringifiedMemorySize> localSizeEnv("cluster.local_memory");
+		size_t localSizePerNode = localSizeEnv.getValue();
+		if (localSizePerNode == 0) {
+			FatalErrorHandler::warn("cluster.local_memory not from toml.");
+			localSizePerNode = std::min(2UL << 30, HardwareInfo::getPhysicalMemorySize() / 20);
+		}
+		FatalErrorHandler::failIf(localSizePerNode <= 0, "cluster.local_memory is zero.");
+		localSizePerNode = ROUND_UP(localSizePerNode, HardwareInfo::getPageSize());
+
+		// The cluster.distributed_memory variable determines the total address space to be
+		// used for distributed allocations across the cluster The efault value is 2GB
+		ConfigVariable<StringifiedMemorySize> distribSizeEnv("cluster.distributed_memory");
+		FatalErrorHandler::failIf(distribSizeEnv.getValue() <= 0, "cluster.distributed_memory is zero.");
+		const size_t distribSize = ROUND_UP(distribSizeEnv.getValue(), HardwareInfo::getPageSize());
+
+		const size_t totalVirtualMemory = distribSize + localSizePerNode * initData._numMaxNodes;
+
+		assert(!ClusterManager::isSpawned());
+		ConfigVariable<uint64_t> confStartAddress("cluster.va_start");
+		void *startAddress = (void *) confStartAddress.getValue();
+
+		// If the start address was not specified then coordinate with other processes.
+		if (startAddress == nullptr) {
+			DataAccessRegion totalGap = VirtualMemoryManagement::findSuitableMemoryRegion();
+
+			FatalErrorHandler::failIf(totalGap.getSize() < totalVirtualMemory,
+				"Cannot allocate virtual memory region with size: ", totalVirtualMemory);
+
+			startAddress = totalGap.getStartAddress();
+		}
+
+		initData._virtualAllocation = DataAccessRegion(startAddress, totalVirtualMemory);
+
+		void* distribStart
+			= (char *)initData._virtualAllocation.getStartAddress()
+			+ localSizePerNode * initData._numMaxNodes;
+
+		initData._virtualDistributedRegion = DataAccessRegion(distribStart, distribSize);
+
+		initData._localSizePerNode = localSizePerNode;
 	}
-	assert(localSize > 0);
-	localSize = ROUND_UP(localSize, HardwareInfo::getPageSize());
 
-	ConfigVariable<uint64_t> startAddress("cluster.va_start");
-	void *address = (void *) startAddress.getValue();
-	size_t size = distribSize + localSize * ClusterManager::clusterSize();
+	return initData;
+}
 
-	// If the start address was not specified then coordinate with other processes.
-	if (address == nullptr) {
-		DataAccessRegion gap;
-		gap = findSuitableMemoryRegion();
-		address = gap.getStartAddress();
-		FatalErrorHandler::failIf(gap.getSize() < size, "Cannot allocate virtual memory region");
-	}
+VirtualMemoryManagement::VirtualMemoryManagement(const ClusterManager::DataInitSpawn &initData)
+	: _allocation(new VirtualMemoryAllocation(initData._virtualAllocation)),
+	  _distributedVirtualRegion(new VirtualMemoryArea(initData._virtualDistributedRegion)),
+	  _localSizePerNode(initData._localSizePerNode)
+{
+	assert(!initData._virtualAllocation.empty());
+	assert(!initData._virtualDistributedRegion.empty());
+	assert(initData._localSizePerNode > 0);
+	assert(_allocation != nullptr);
+	assert(_distributedVirtualRegion != nullptr);
 
-	assert(_allocations.empty());
-	_allocations.push_back(new VirtualMemoryAllocation(address, size));
+	FatalErrorHandler::failIf(_allocation->fullyContainsRegion(*_distributedVirtualRegion) == false,
+		"Distributed virtual region: ", _distributedVirtualRegion,
+		" not fully contained in allocated virtual region: ", std::ref(*_allocation));
 
-	setupMemoryLayout(address, distribSize, localSize);
-
-	RuntimeInfo::addEntry("distributed_memory_size", "Size of distributed memory", distribSize);
-	RuntimeInfo::addEntry("local_memorysize", "Size of local memory per node", localSize);
-	RuntimeInfo::addEntry("va_start", "Virtual address space start", (unsigned long)address);
+	RuntimeInfo::addEntry(
+		"va_start", "Virtual address space start",
+		(unsigned long)_allocation->getStartAddress()
+	);
+	RuntimeInfo::addEntry("distributed_memory_size", "Size of distributed memory",
+		_allocation->getSize());
+	RuntimeInfo::addEntry("local_memorysize", "Size of local memory per node", _localSizePerNode);
 }
 
 
@@ -208,75 +249,64 @@ VirtualMemoryManagement::~VirtualMemoryManagement()
 	for (auto &vma : _localNUMAVMA) {
 		delete vma;
 	}
-	delete _genericVMA;
-
-	for (auto &alloc : _allocations) {
-		delete alloc;
-	}
+	delete _distributedVirtualRegion;
+	delete _allocation;
 
 	_localNUMAVMA.clear();
-	_allocations.clear();
 }
 
 
-
-void VirtualMemoryManagement::setupMemoryLayout(void *address, size_t distribSize, size_t localSize)
+void VirtualMemoryManagement::setupMemoryLayout()
 {
-	assert(address != nullptr);
-	assert(distribSize > 0);
-	assert(localSize > 0);
-	const ClusterNode *current = ClusterManager::getCurrentClusterNode();
-	const std::vector<ClusterNode *> &nodesList = ClusterManager::getClusterNodes();
-
-	const void *distribAddress = (void *)((char *)address + localSize * nodesList.size());
-	_genericVMA = new VirtualMemoryArea(distribAddress, distribSize);
-	const char *localAddress = (char *)address + localSize * current->getIndex();
+	assert(!_allocation->empty());
+	assert(!_distributedVirtualRegion->empty());
+	assert(_allocation->getSize() > _distributedVirtualRegion->getSize());
 
 	// Register local addresses with the Directory
-	for (ClusterNode *node : nodesList) {
-		if (node == current) {
+	for (const ClusterNode *node : ClusterManager::getClusterNodes()) {
+		if (node != ClusterManager::getCurrentClusterNode()) {
+			registerNodeLocalRegion(node);
 			continue;
 		}
 
-		void *ptr = (void *)((char *)address + localSize * node->getIndex());
-		DataAccessRegion localRegion(ptr, localSize);
-		Directory::insert(localRegion, node->getMemoryNode());
-	}
+		// We have one VMA per NUMA node. At the moment we divide the local
+		// address space equally among these areas.
+		assert(_localNUMAVMA.empty());
+		const size_t numaNodeCount =
+			HardwareInfo::getMemoryPlaceCount(nanos6_device_t::nanos6_host_device);
+		assert(numaNodeCount > 0);
+		_localNUMAVMA.reserve(numaNodeCount);
 
-	// We have one VMA per NUMA node. At the moment we divide the local
-	// address space equally among these areas.
-	assert(_localNUMAVMA.empty());
-	const size_t numaNodeCount =
-		HardwareInfo::getMemoryPlaceCount(nanos6_device_t::nanos6_host_device);
-	assert(numaNodeCount > 0);
-	_localNUMAVMA.resize(numaNodeCount);
+		// Divide the address space between the NUMA nodes making sure that all areas have a size that
+		// is multiple of PAGE_SIZE
+		const size_t pageSize = HardwareInfo::getPageSize();
+		assert(pageSize > 0);
+		const size_t localPages = _localSizePerNode / pageSize;
+		assert(localPages > 0);
+		const size_t pagesPerNUMA = localPages / numaNodeCount;
+		assert(pagesPerNUMA > 0);
+		const size_t sizePerNUMA = pagesPerNUMA * pageSize;
+		assert(sizePerNUMA > 0);
 
-	// Divide the address space between the NUMA nodes and the
-	// making sure that all areas have a size that is multiple
-	// of PAGE_SIZE
-	const size_t pageSize = HardwareInfo::getPageSize();
-	assert(pageSize > 0);
-	const size_t localPages = localSize / pageSize;
-	assert(localPages > 0);
-	const size_t pagesPerNUMA = localPages / numaNodeCount;
-	const size_t sizePerNUMA = pagesPerNUMA * pageSize;
-	assert(sizePerNUMA > 0);
-	assert(pagesPerNUMA > 0);
+		size_t extraPages = localPages % numaNodeCount;
+		char *ptr = (char *)_allocation->getStartAddress() + _localSizePerNode * node->getIndex();
 
-	size_t extraPages = localPages % numaNodeCount;
-	char *ptr = (char *)localAddress;
-	for (size_t i = 0; i < numaNodeCount; ++i) {
-		size_t numaSize = sizePerNUMA;
-		if (extraPages > 0) {
-			numaSize += pageSize;
-			extraPages--;
+		assert(ptr <= _distributedVirtualRegion->getStartAddress());
+		assert(ptr + _localSizePerNode <= _distributedVirtualRegion->getStartAddress());
+
+		for (size_t i = 0; i < numaNodeCount; ++i) {
+			size_t numaSize = sizePerNUMA;
+			if (extraPages > 0) {
+				numaSize += pageSize;
+				extraPages--;
+			}
+			_localNUMAVMA.push_back(new VirtualMemoryArea(ptr, numaSize));
+
+			// Register the region with the Directory
+			const DataAccessRegion numaRegion(ptr, numaSize);
+			Directory::insert(numaRegion, HardwareInfo::getMemoryPlace(nanos6_host_device, i));
+
+			ptr += numaSize;
 		}
-		_localNUMAVMA[i] = new VirtualMemoryArea(ptr, numaSize);
-
-		// Register the region with the Directory
-		const DataAccessRegion numaRegion(ptr, numaSize);
-		Directory::insert(numaRegion, HardwareInfo::getMemoryPlace(nanos6_host_device, i));
-
-		ptr += numaSize;
 	}
 }

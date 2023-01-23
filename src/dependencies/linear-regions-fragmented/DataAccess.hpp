@@ -35,8 +35,6 @@
 #include "cluster/offloading/OffloadedTaskId.hpp"
 #include "cluster/ClusterManager.hpp"
 
-
-struct DataAccess;
 class Task;
 class MemoryPlace;
 
@@ -294,6 +292,11 @@ public:
 
 	void setWriteID(WriteID id)
 	{
+#ifndef NDEBUG
+		if (id != 0) {
+			assert(WriteIDManager::isEnabled());
+		}
+#endif // NDEBUG
 		_writeID = id;
 	}
 
@@ -301,6 +304,11 @@ public:
 	void setNewWriteID()
 	{
 		WriteID id = WriteIDManager::createWriteID();
+#ifndef NDEBUG
+		if (id != 0) {
+			assert(WriteIDManager::isEnabled());
+		}
+#endif // NDEBUG
 		setWriteID(id);
 	}
 
@@ -308,6 +316,11 @@ public:
 	void setNewLocalWriteID()
 	{
 		WriteID id = WriteIDManager::createWriteID();
+#ifndef NDEBUG
+		if (id != 0) {
+			assert(WriteIDManager::isEnabled());
+		}
+#endif // NDEBUG
 		WriteIDManager::registerWriteIDasLocal(id, getAccessRegion());
 		setWriteID(id);
 	}
@@ -984,7 +997,12 @@ public:
 
 	friend std::ostream& operator<<(std::ostream& out, const DataAccess& access)
 	{
-		out << access._region << " id: " << access._writeID << " loc: " << *access._location;
+		out << access._region << " id: " << access._writeID;
+		if (access._location != nullptr) {
+			out  << " loc: " << *access._location;
+		} else {
+			out  << " loc: null";
+		}
 		return out;
 	}
 

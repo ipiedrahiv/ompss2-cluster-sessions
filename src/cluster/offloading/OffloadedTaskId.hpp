@@ -30,17 +30,12 @@ private:
 	}
 
 public:
-	static void initialize(int nodeIndex, int clusterSize)
+	static void initialize(int nodeIndex, __attribute__((unused)) int clusterSize)
 	{
 		assert(_singleton == nullptr);
-		_singleton = new OffloadedTaskIdManager();
-		OffloadedTaskIdManager::reset(nodeIndex, clusterSize);
-	}
-
-	static void reset(int nodeIndex, __attribute__((unused)) int clusterSize)
-	{
-		assert(_singleton != nullptr);
 		assert(clusterSize < (1 << logMaxNodes));
+		_singleton = new OffloadedTaskIdManager();
+		assert(_singleton != nullptr);
 		_singleton->_counter = 1 + (((size_t)nodeIndex) << (64 - logMaxNodes));
 	}
 

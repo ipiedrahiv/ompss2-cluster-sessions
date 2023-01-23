@@ -23,9 +23,7 @@ namespace ClusterDirectory {
 	//! \param[in] policy is the policy to distribute memory across nodes
 	//! \param[in] nrDimensions is the number of policy dimensions
 	//! \param[in] dimensions is the dimensions of the distribution policy
-	void registerAllocation(
-		const ClusterMemoryManagement::DmallocDataInfo *dmallocInfo, Task *task, size_t clusterSize
-	);
+	void registerAllocation(const ClusterMemoryManagement::DmallocDataInfo *dmallocInfo, Task *task);
 
 	//! \brief Unregister a DataAccessRegion from the Directory
 	//!

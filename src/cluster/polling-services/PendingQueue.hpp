@@ -142,7 +142,7 @@ namespace ClusterPollingServices {
 		static void registerService()
 		{
 			assert(_singleton._live.load() == false);
-			_singleton._live = true;
+			_singleton._live.store(true);
 		}
 
 		static void waitUntilFinished()
@@ -161,7 +161,7 @@ namespace ClusterPollingServices {
 						Instrument::ThreadInstrumentationContext::getCurrent(),
 						"Waiting for all messages pendings and incomming"
 					);
-					sleep(1);
+					//sleep(1);
 					executeService();
 				}
 			}
@@ -170,7 +170,7 @@ namespace ClusterPollingServices {
 		static void unregisterService()
 		{
 			assert(_singleton._live.load() == true);
-			_singleton._live = false;
+			_singleton._live.store(false);
 
 #ifndef NDEBUG
 			std::lock_guard<PaddedSpinLock<>> guard(_singleton._lock);

@@ -39,6 +39,9 @@ private:
 	//! The number of busy cores reported in the utilization<n> file
 	float _numBusyCores;
 
+	std::string _hostname;
+
+
 	std::atomic<int> _numOffloadedTasks; // offloaded by us
 
 public:
@@ -145,6 +148,23 @@ public:
 	inline int getInstrumentationRank() const
 	{
 		return _instrumentationRank;
+	}
+
+	std::string getHostName() const
+	{
+		return _hostname;
+	}
+
+	void setHostName(std::string hostname)
+	{
+		_hostname = hostname;
+	}
+
+
+	friend std::ostream& operator<<(std::ostream& out, const ClusterNode& in)
+	{
+		out << "Node:" << in._index << "[" << in._commIndex << "]";
+		return out;
 	}
 };
 

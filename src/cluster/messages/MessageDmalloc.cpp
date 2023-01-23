@@ -32,11 +32,13 @@ MessageDmalloc::MessageDmalloc(
 }
 
 MessageDmalloc::MessageDmalloc(const ClusterMemoryManagement::dmalloc_container_t &dmallocs)
-	: Message(DMALLOC,
+	: Message(DMALLOC_INFO,
 		sizeof(size_t)
 		+ dmallocs.size() * sizeof(size_t)
 		+ ClusterMemoryManagement::getSerializedDmallocsSize())
 {
+	assert(dmallocs.size() > 0);
+
 	_content = reinterpret_cast<DmallocMessageContent *>(_deliverable->payload);
 	_content->_ndmallocs = dmallocs.size();
 
@@ -45,16 +47,9 @@ MessageDmalloc::MessageDmalloc(const ClusterMemoryManagement::dmalloc_container_
 	for (const ClusterMemoryManagement::DmallocDataInfo *it : dmallocs) {
 		_content->getOffsetPtr()[i] = offset;
 		ClusterMemoryManagement::DmallocDataInfo *data = _content->getData(i);
-
-		new (data) ClusterMemoryManagement::DmallocDataInfo(
-			it->_region,
-			it->_clusterSize,
-			it->_policy,
-			it->_nrDim,
-			it->_dimensions
-		);
-
 		assert(it->getSize() == data->getSize());
+
+		memcpy(data, it, data->getSize());
 
 		offset += it->getSize();
 		++i;
@@ -97,3 +92,5 @@ bool MessageDmalloc::handleMessage()
 
 static const bool __attribute__((unused))_registered_dmalloc =
 	Message::RegisterMSGClass<MessageDmalloc>(DMALLOC);
+static const bool __attribute__((unused))_registered_dmalloc_info =
+	Message::RegisterMSGClass<MessageDmalloc>(DMALLOC_INFO);

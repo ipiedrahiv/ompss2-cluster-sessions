@@ -18,14 +18,11 @@ class ClusterServicesPolling {
 
 	// Defined in ClusterManager.cpp
 	static std::atomic<size_t> _activeClusterPollingServices;
-	static std::atomic<bool> _pausedServices;
 
 	template <typename T>
 	static int bodyClusterService(__attribute__((unused)) void *args)
 	{
-		if (!_pausedServices.load()) {
-			T::executeService(); // This returns true unless the service is unregistered
-		}
+		T::executeService(); // This returns true unless the service is unregistered
 		return 0;
 	}
 
@@ -53,6 +50,11 @@ class ClusterServicesPolling {
 
 public:
 
+	inline static int count()
+	{
+		return _activeClusterPollingServices;
+	}
+
 	//! \brief Initialize the Cluster polling services
 	//!
 	//! This method will be called during ClusterManager
@@ -78,23 +80,14 @@ public:
 
 	inline static void waitUntilFinished()
 	{
+		ClusterPollingServices::MessageHandler<Message>::waitUntilFinished();
 		ClusterPollingServices::PendingQueue<Message>::waitUntilFinished();
 		ClusterPollingServices::PendingQueue<DataTransfer>::waitUntilFinished();
 	}
 
-	inline static void setPauseStatus(bool pause)
-	{
-		_pausedServices.store(pause);
-
-		if (pause == true) {
-			waitUntilFinished();
-		}
-	}
-
 	//! \brief Shutdown the Cluster polling services-
 	//!
-	//! This method will be called during ClusterManager
-	//! shutdown.
+	//! This method will be called during ClusterManager shutdown.
 	//! New type of polling services need to expose a
 	//! shutdown interface that will be called from here.
 	inline static void shutdown(bool hybridOnly = false)

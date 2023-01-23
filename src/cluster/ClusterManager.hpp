@@ -13,15 +13,15 @@
 #include <vector>
 #include <type_traits>
 
-#include "cluster/messenger/TransferBase.hpp"
-#include "cluster/messenger/Messenger.hpp"
-#include "cluster/messenger/DataTransfer.hpp"
+#include "messages/MessageResize.hpp"
+#include "messenger/TransferBase.hpp"
+#include "messenger/Messenger.hpp"
+#include "messenger/DataTransfer.hpp"
 
 #include <ClusterNode.hpp>
-#include <MessageDataFetch.hpp>
-#include <MessageDataSend.hpp>
-#include <ClusterShutdownCallback.hpp>
 #include "memory/directory/Directory.hpp"
+
+#include <HackReport.hpp>
 
 namespace ExecutionWorkflow
 {
@@ -31,6 +31,24 @@ namespace ExecutionWorkflow
 class ClusterMemoryNode;
 
 class ClusterManager {
+public:
+	struct DataInitSpawn {
+		DataAccessRegion _virtualAllocation;
+		DataAccessRegion _virtualDistributedRegion;
+		size_t _localSizePerNode = 0, _numMinNodes = 0, _numMaxNodes = 0;
+
+		nanos6_spawn_policy_t defaultSpawnPolicy = nanos6_spawn_by_host;
+		nanos6_shrink_transfer_policy_t defaultShrinkTransferPolicy = nanos6_spawn_lazy;
+
+		inline bool clusterMalleabilityEnabled() const
+		{
+			assert(_numMinNodes != 0);
+			assert(_numMaxNodes != 0);
+			return _numMinNodes != _numMaxNodes;
+		}
+	};
+
+	HackReport _report;
 
 private:
 	bool _clusterRequested; // Built with cluster and cluster.communication is not disabled
@@ -40,24 +58,27 @@ private:
 
 	//! A vector of all ClusterNodes in the system.
 	//!
-	//! We might need to make this a map later on, when we start
-	//! adding/removing nodes
+	//! We might need to make this a map later on, when we start adding/removing nodes
 	std::vector<ClusterNode *> _clusterNodes;
+	size_t _numMaxNodes = 0;
+
+	//! Malleability variables
+	struct DataInitSpawn _dataInit;
 
 	//! ClusterNode object of the current node
-	ClusterNode * _thisNode;
+	ClusterNode * _thisNode = nullptr;
 
 	//! ClusterNode of the master node
-	ClusterNode * _masterNode;
+	ClusterNode * _masterNode = nullptr;
 
 	//! Messenger object for cluster communication.
-	Messenger * _msn;
+	Messenger * _msn = nullptr;
 
 	//! Using cluster namespace
-	bool _disableRemote;
-	bool _disableRemoteConnect;
+	bool _disableRemote = false;
+	bool _disableRemoteConnect = false;
 
-	bool _disableAutowait;
+	bool _disableAutowait = false;
 
 	bool _eagerWeakFetch;
 
@@ -71,6 +92,8 @@ private:
 
 	int _numMessageHandlerWorkers;
 
+	bool _groupMessages;
+
 	//! private constructors. This is a singleton.
 	ClusterManager();
 
@@ -78,9 +101,14 @@ private:
 
 	~ClusterManager();
 
-	void internal_reset();
-
 public:
+
+	static HackReport &getReport()
+	{
+		assert(_singleton != nullptr);
+		return _singleton->_report;
+	}
+
 	//! \brief Initialize the ClusterManager
 	//! This is called before initializing the memory allocator because it collects some
 	//! information needed by the memory allocator latter.
@@ -126,6 +154,7 @@ public:
 		assert(_singleton != nullptr);
 		assert(!_singleton->_clusterNodes.empty());
 		assert((size_t)id < _singleton->_clusterNodes.size());
+		assert(_singleton->_clusterNodes[id] != nullptr);
 
 		return _singleton->_clusterNodes[id];
 	}
@@ -148,9 +177,10 @@ public:
 	static inline ClusterMemoryNode *getMemoryNode(int id)
 	{
 		assert(_singleton != nullptr);
-		assert(!_singleton->_clusterNodes.empty());
+		assert(_singleton->_clusterNodes.empty() ==  false);
+		assert((int)_singleton->_clusterNodes.size() > id);
 		assert(_singleton->_clusterNodes[id] != nullptr);
-		assert (!Directory::isDirectoryMemoryPlaceIdx(id));
+		assert(!Directory::isDirectoryMemoryPlaceIdx(id));
 		return _singleton->_clusterNodes[id]->getMemoryNode();
 	}
 
@@ -170,6 +200,7 @@ public:
 	{
 		assert(_singleton != nullptr);
 		assert(_singleton->_thisNode != nullptr);
+		assert(_singleton->_thisNode->getMemoryNode() != nullptr);
 		return _singleton->_thisNode->getMemoryNode();
 	}
 
@@ -184,6 +215,14 @@ public:
 		return _singleton->_masterNode == _singleton->_thisNode;
 	}
 
+
+	//! \brief Returns the init data received during the initialization.
+	static inline DataInitSpawn &getInitData()
+	{
+		assert(_singleton != nullptr);
+		return _singleton->_dataInit;
+	}
+
 	//! \brief Get the number of cluster nodes
 	//!
 	//! \returns the number of cluster nodes
@@ -192,6 +231,12 @@ public:
 		assert(_singleton != nullptr);
 		assert(!_singleton->_clusterNodes.empty());
 		return _singleton->_clusterNodes.size();
+	}
+
+	static inline int clusterMaxSize()
+	{
+		assert(_singleton != nullptr);
+		return _singleton->_numMaxNodes;
 	}
 
 	//! \brief Check if we run in cluster mode
@@ -205,6 +250,12 @@ public:
 	{
 		assert(_singleton != nullptr);
 		assert(!_singleton->_clusterNodes.empty());
+#ifndef NDEBUG
+		if (_singleton->_clusterNodes.size() > 1
+			|| _singleton->_dataInit.clusterMalleabilityEnabled()) {
+			assert(_singleton->_msn != nullptr);
+		}
+#endif
 		return _singleton->_clusterNodes.size() > 1;
 	}
 
@@ -256,8 +307,7 @@ public:
 	//!
 	//! \param[in] msg is the Message to send
 	//! \param[in] recipient is the remote node to send the Message
-	//! \param[in] if block is true the the call will block until the
-	//!		Message is sent
+	//! \param[in] if block is true the the call will block until the Message is sent
 	static inline void sendMessage(Message *msg, ClusterNode const *recipient, bool block = false)
 	{
 		assert(_singleton != nullptr);
@@ -267,13 +317,24 @@ public:
 		_singleton->_msn->sendMessage(msg, recipient, block);
 	}
 
-	static inline void sendMessageToAll(Message *msg, bool block = false)
-	{
+	static inline void sendMessageToAll(
+		Message *msg, bool block = false,
+		size_t first = 0, size_t last = std::numeric_limits<short>::max()
+	) {
 		assert(_singleton != nullptr);
 		assert(_singleton->_msn != nullptr);
 		assert(msg != nullptr);
 
-		for (ClusterNode *node : _singleton->_clusterNodes) {
+		if (last == std::numeric_limits<short>::max()) {
+			last = _singleton->_clusterNodes.size();
+		}
+
+		assert(last <= _singleton->_clusterNodes.size());
+
+		for (size_t i = first; i < last; ++i) {
+
+			ClusterNode *node = ClusterManager::getClusterNode(i);
+
 			// Not send to myself and avoid ping-pong.
 			if (node == _singleton->_thisNode || msg->getSenderId() == node->getIndex()) {
 				continue;
@@ -370,6 +431,12 @@ public:
 		return _singleton->_msn->sendData(region, remoteNode, messageId, block, instrument);
 	}
 
+	static inline bool isSpawned()
+	{
+		assert(_singleton != nullptr);
+		return _singleton->_msn != nullptr && _singleton->_msn->isSpawned();
+	}
+
 	//! \brief Initiate a data fetch operation
 	//!
 	//! \param[in] region is the local region we want to update with data
@@ -433,16 +500,9 @@ public:
 
 	static size_t getMPIFragments(DataAccessRegion const &remoteRegion)
 	{
-		const size_t totalSize = remoteRegion.getSize();
-		assert(totalSize > 0);
-
-		const size_t maxRegionSize = _singleton->_msn->getMessageMaxSize();
-		// Note: this calculation still works when maxRegionSize == SIZE_MAX.
-		size_t nFragments = totalSize / maxRegionSize;
-		if ((totalSize % maxRegionSize) != 0) {
-			nFragments++;
-		}
-		return nFragments;
+		assert(_singleton != nullptr);
+		assert(_singleton->_msn != nullptr);
+		return _singleton->_msn->getMessageFragments(remoteRegion);
 	}
 
 	static bool getEagerWeakFetch()
@@ -581,8 +641,36 @@ public:
 		return _singleton->_totalReadyTasks;
 	}
 
-};
+	static bool getGroupMessagesEnabled()
+	{
+		assert(_singleton != nullptr);
+		return _singleton->_groupMessages;
+	}
 
+	static int nanos6GetInfo(nanos6_cluster_info_t *info);
+
+#if HAVE_SLURM
+	void initializeMalleabilityVars();
+
+	// Spawn all processes at once; rely on slurm srun policy.. Use this policy only for profiling
+	// purposes.
+	int resizeFull(int delta, size_t nEntries, const MessageSpawnHostInfo *entries);
+	int resizeByPolicy(
+		nanos6_spawn_policy_t policy,
+		int delta, size_t nEntries, const MessageSpawnHostInfo *entries
+	);
+
+	//! \brief Spawn new processes.
+	//!
+	//! \param[in] Number of desired new nodes
+	//! \returns On success returns delta.
+	static int handleResizeMessage(const MessageSpawn *msgSpawn);
+	static int handleResizeMessage(const MessageShrink *msgShrink);
+
+	static int nanos6Resize(int delta, nanos6_spawn_policy_t policy);
+#endif // HAVE_SLURM
+
+};
 
 
 

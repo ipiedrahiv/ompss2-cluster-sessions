@@ -27,6 +27,12 @@ ConfigCentral::ConfigCentral() :
 	registerOption<bool_t>("cluster.disable_remote_connect", true);
 	registerOption<bool_t>("cluster.disable_autowait", false);
 	registerOption<integer_t>("cluster.num_message_handler_workers", 2);
+	registerOption<integer_t>("cluster.num_max_nodes", 0);
+	registerOption<bool_t>("cluster.group_messages", true);
+	registerOption<bool_t>("cluster.enable_write_id", true);
+
+	registerOption<string_t>("cluster.default_spawn_policy", "host");
+	registerOption<string_t>("cluster.default_shrink_transfer_policy", "lazy");
 
 	registerOption<bool_t>("cluster.mpi.comm_data_raw", true);
 
@@ -46,6 +52,7 @@ ConfigCentral::ConfigCentral() :
 
 	// CPU manager
 	registerOption<string_t>("cpumanager.policy", "default");
+	registerOption<bool_t>("cpumanager.reserve_cpu_leader", true);
 
 	// CUDA devices
 	registerOption<integer_t>("devices.cuda.page_size", 0x8000);

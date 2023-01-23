@@ -4,10 +4,14 @@
 	Copyright (C) 2018-2020 Barcelona Supercomputing Center (BSC)
 */
 
+#include <vector>
+
 #include "ClusterManager.hpp"
 #include "ClusterHybridManager.hpp"
+#include "ClusterMemoryManagement.hpp"
 #include "messages/MessageSysFinish.hpp"
 #include "messages/MessageDataFetch.hpp"
+#include "messages/MessageDmalloc.hpp"
 
 #include "messenger/Messenger.hpp"
 #include "polling-services/ClusterServicesPolling.hpp"
@@ -27,6 +31,12 @@
 #include "executors/workflow/cluster/ExecutionWorkflowCluster.hpp"
 #include "executors/threads/WorkerThread.hpp"
 
+#include "executors/threads/CPUManager.hpp"
+
+#ifdef HAVE_SLURM
+#include "SlurmAPI.hpp"
+#endif
+
 TaskOffloading::RemoteTasksInfoMap *TaskOffloading::RemoteTasksInfoMap::_singleton = nullptr;
 TaskOffloading::OffloadedTasksInfoMap *TaskOffloading::OffloadedTasksInfoMap::_singleton = nullptr;
 ClusterManager *ClusterManager::_singleton = nullptr;
@@ -36,39 +46,66 @@ WriteIDManager *WriteIDManager::_singleton = nullptr;
 OffloadedTaskIdManager *OffloadedTaskIdManager::_singleton = nullptr;
 
 std::atomic<size_t> ClusterServicesPolling::_activeClusterPollingServices(0);
-std::atomic<bool> ClusterServicesPolling::_pausedServices(false);
-
 std::atomic<size_t> ClusterServicesTask::_activeClusterTaskServices(0);
-std::atomic<bool> ClusterServicesTask::_pausedServices(false);
 
 ClusterManager::ClusterManager()
 	: _clusterRequested(false),
 	_clusterNodes(1),
 	_thisNode(new ClusterNode(0, 0, 0, false, 0)),
 	_masterNode(_thisNode),
-	_msn(nullptr),
-	_disableRemote(false), _disableRemoteConnect(false), _disableAutowait(false)
+	_msn(nullptr)
 {
 	assert(_singleton == nullptr);
 	_clusterNodes[0] = _thisNode;
 	MessageId::initialize(0, 1);
 	WriteIDManager::initialize(0,1);
 	OffloadedTaskIdManager::initialize(0,1);
+
+	_dataInit._numMinNodes = 1;
+	_dataInit._numMaxNodes = 1;
 }
 
 ClusterManager::ClusterManager(std::string const &commType, int argc, char **argv)
 	: _clusterRequested(true),
-	_msn(GenericFactory<std::string,Messenger*,int,char**>::getInstance().create(commType, argc, argv)),
-	_disableRemote(false), _disableRemoteConnect(false), _disableAutowait(false)
+	_msn(GenericFactory<std::string,Messenger*,int,char**>::getInstance().create(commType, argc, argv))
 {
 	assert(_msn != nullptr);
-
 	TaskOffloading::RemoteTasksInfoMap::init();
 	TaskOffloading::OffloadedTasksInfoMap::init();
 
-	this->internal_reset();
+	const size_t clusterSize = _msn->getClusterSize();
+	const int apprankNum = _msn->getApprankNum();
+	const int externalRank = _msn->getExternalRank();
+	const int internalRank = _msn->getNodeIndex();  /* internal rank */
+	const int physicalNodeNum = _msn->getPhysicalNodeNum();
+	const int indexThisPhysicalNode = _msn->getIndexThisPhysicalNode();
+	const int masterIndex = _msn->getMasterIndex();
 
-	_msn->synchronizeAll();
+	const int numAppranks = _msn->getNumAppranks();
+	const bool inHybridMode = numAppranks > 1;
+
+	// Initialize the DLB stuff
+	const std::vector<int> &internalRankToExternalRank = _msn->getInternalRankToExternalRank();
+	const std::vector<int> &instanceThisNodeToExternalRank = _msn->getInstanceThisNodeToExternalRank();
+
+	ClusterHybridManager::preinitialize(
+		inHybridMode, externalRank, apprankNum, internalRank, physicalNodeNum, indexThisPhysicalNode,
+		clusterSize, internalRankToExternalRank, instanceThisNodeToExternalRank
+	);
+
+	// Called from constructor the first time
+	this->_clusterNodes.resize(clusterSize);
+
+	for (size_t i = 0; i < clusterSize; ++i) {
+		_clusterNodes[i] = new ClusterNode(i, i, apprankNum, inHybridMode, _msn->internalRankToInstrumentationRank(i));
+	}
+
+	_thisNode = _clusterNodes[internalRank];
+	_masterNode = _clusterNodes[masterIndex];
+
+	assert(_thisNode != nullptr);
+	assert(_masterNode != nullptr);
+	assert(_thisNode->getCommIndex() == internalRank);
 
 	ConfigVariable<bool> disableRemote("cluster.disable_remote");
 	_disableRemote = disableRemote.getValue();
@@ -96,6 +133,16 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 
 	ConfigVariable<int> numMessageHandlerWorkers("cluster.num_message_handler_workers");
 	_numMessageHandlerWorkers = numMessageHandlerWorkers.getValue();
+
+	ConfigVariable<size_t> numMaxNodes("cluster.num_max_nodes");
+	_numMaxNodes = (numMaxNodes.getValue() > clusterSize ? numMaxNodes.getValue() : clusterSize);
+
+	ConfigVariable<bool> groupMessages("cluster.group_messages");
+	_groupMessages = groupMessages.getValue();
+
+	MessageId::initialize(internalRank, _numMaxNodes);
+	WriteIDManager::initialize(internalRank, _numMaxNodes);
+	OffloadedTaskIdManager::initialize(internalRank, _numMaxNodes);
 }
 
 ClusterManager::~ClusterManager()
@@ -103,6 +150,15 @@ ClusterManager::~ClusterManager()
 	OffloadedTaskIdManager::finalize();
 	WriteIDManager::finalize();
 	MessageId::finalize();
+
+#if HAVE_SLURM
+	if (SlurmAPI::isEnabled()) {
+		assert(ClusterManager::isMasterNode());
+		assert(!ClusterManager::isSpawned());
+		assert(ClusterManager::getInitData().clusterMalleabilityEnabled());
+		SlurmAPI::finalize();
+	}
+#endif // HAVE_SLURM
 
 	for (auto &node : _clusterNodes) {
 		delete node;
@@ -113,55 +169,11 @@ ClusterManager::~ClusterManager()
 	_msn = nullptr;
 }
 
-// Static 
+// Static
 void ClusterManager::initClusterNamespace(void (*func)(void *), void *args)
 {
 	assert(_singleton != nullptr);
 	NodeNamespace::init(func, args);
-}
-
-
-void ClusterManager::internal_reset() {
-
-	/** These are communicator-type indices. At the moment we have an
-	 * one-to-one mapping between communicator-type and runtime-type
-	 * indices for cluster nodes */
-
-	const size_t clusterSize = _msn->getClusterSize();
-	const int apprankNum = _msn->getApprankNum();
-	const int externalRank = _msn->getExternalRank();
-	const int internalRank = _msn->getNodeIndex();  /* internal rank */
-	const int physicalNodeNum = _msn->getPhysicalNodeNum();
-	const int indexThisPhysicalNode = _msn->getIndexThisPhysicalNode();
-	const int masterIndex = _msn->getMasterIndex();
-
-	// TODO: Check if this initialization may conflict somehow.
-	MessageId::initialize(internalRank, clusterSize); // only need to be unique message IDs inside an apprank
-	WriteIDManager::initialize(internalRank, clusterSize);
-	OffloadedTaskIdManager::initialize(internalRank, clusterSize);
-
-	int numAppranks = _msn->getNumAppranks();
-	bool inHybridMode = numAppranks > 1;
-
-	const std::vector<int> &internalRankToExternalRank = _msn->getInternalRankToExternalRank();
-	const std::vector<int> &instanceThisNodeToExternalRank = _msn->getInstanceThisNodeToExternalRank();
-
-	ClusterHybridManager::preinitialize(
-		inHybridMode, externalRank, apprankNum, internalRank, physicalNodeNum, indexThisPhysicalNode,
-		clusterSize, internalRankToExternalRank, instanceThisNodeToExternalRank
-		);
-
-	if (this->_clusterNodes.empty()) {
-		// Called from constructor the first time
-		this->_clusterNodes.resize(clusterSize);
-
-		for (size_t i = 0; i < clusterSize; ++i) {
-			_clusterNodes[i] = new ClusterNode(i, i, apprankNum, inHybridMode, _msn->internalRankToInstrumentationRank(i));
-		}
-
-		_thisNode = _clusterNodes[internalRank];
-		_masterNode = _clusterNodes[masterIndex];
-	}
 }
 
 
@@ -173,18 +185,25 @@ void ClusterManager::initialize(int argc, char **argv)
 
 	RuntimeInfo::addEntry("cluster_communication", "Cluster Communication Implementation", commType);
 
-	/** If a communicator has not been specified through the
-	 * cluster.communication config variable we will not
-	 * initialize the cluster support of Nanos6 */
-	if (commType.getValue() != "disabled") {
+	if (commType.getValue() == "disabled") {
+		_singleton = new ClusterManager();
+		assert(_singleton != nullptr);
+	} else {
+		/** If a communicator has not been specified through the cluster.communication config
+		 * variable we will not initialize the cluster support of Nanos6 */
 		assert(argc > 0);
 		assert(argv != nullptr);
 		_singleton = new ClusterManager(commType.getValue(), argc, argv);
-	} else {
-		_singleton = new ClusterManager();
-	}
+		assert(_singleton != nullptr);
 
-	assert(_singleton != nullptr);
+#if HAVE_SLURM
+		_singleton->initializeMalleabilityVars();
+#else // HAVE_SLURM
+		FatalErrorHandler::failIf(
+			ClusterManager::isSpawned(), "Can spawn process without malleability support."
+		);
+#endif // HAVE_SLURM
+	}
 }
 
 // This needs to be called AFTER initializing the memory allocator
@@ -236,11 +255,8 @@ void ClusterManager::shutdownPhase1()
 	assert(_singleton != nullptr);
 	assert(MemoryAllocator::isInitialized());
 
-	if (inClusterMode()) {
-		ClusterServicesPolling::waitUntilFinished();
-	}
-
 	if (ClusterManager::getMessenger() != nullptr && ClusterManager::isMasterNode()) {
+		assert(!ClusterManager::isSpawned());
 		MessageSysFinish msg;
 		ClusterManager::sendMessageToAll(&msg, true);
 
@@ -249,9 +265,13 @@ void ClusterManager::shutdownPhase1()
 	}
 
 	if (ClusterManager::inClusterMode()) {
-		ClusterServicesPolling::shutdown();
+		if (ClusterServicesPolling::count() > 0) {
+			ClusterServicesPolling::shutdown();
+		}
 
-		ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
+		if (ClusterServicesTask::count() > 0) {
+			ClusterServicesTask::shutdownWorkers(_singleton->_numMessageHandlerWorkers);
+		}
 
 		TaskOffloading::RemoteTasksInfoMap::shutdown();
 		TaskOffloading::OffloadedTasksInfoMap::shutdown();
@@ -259,6 +279,8 @@ void ClusterManager::shutdownPhase1()
 #if HAVE_DLB
 		ClusterServicesPolling::shutdown(/* hybridOnly */ true);
 #endif
+		assert(ClusterServicesPolling::count() == 0);
+		assert(ClusterServicesTask::count() == 0);
 	}
 
 	if (_singleton->_msn != nullptr) {
@@ -314,19 +336,47 @@ void ClusterManager::fetchVector(
 
 		const std::vector<ExecutionWorkflow::FragmentInfo> &fragments = step->getFragments();
 
-		for (__attribute__((unused)) ExecutionWorkflow::FragmentInfo const &fragment : fragments) {
+		for (ExecutionWorkflow::FragmentInfo const &fragment : fragments) {
 			assert(index < nFragments);
 			assert(content->_remoteRegionInfo[index]._remoteRegion == fragment._region);
 			temporal[index] = fragment._dataTransfer;
-
 			++index;
 		}
 	}
 
 	assert(index == nFragments);
-
 	ClusterPollingServices::PendingQueue<DataTransfer>::addPendingVector(temporal);
-
-	_singleton->_msn->sendMessage(msg, remoteNode);
+	ClusterManager::sendMessage(msg, remoteNode);
 }
 
+int ClusterManager::nanos6GetInfo(nanos6_cluster_info_t *info)
+{
+	assert(_singleton != nullptr);
+	assert(info != nullptr);
+
+	info->spawn_policy = _singleton->_dataInit.defaultSpawnPolicy;
+	info->transfer_policy = _singleton->_dataInit.defaultShrinkTransferPolicy;
+	info->cluster_num_min_nodes = _singleton->_dataInit._numMinNodes;
+	info->cluster_num_max_nodes = _singleton->_dataInit._numMaxNodes;
+	info->malleability_enabled = _singleton->_dataInit.clusterMalleabilityEnabled();
+
+	info->cluster_num_nodes = (unsigned long) ClusterManager::clusterSize();
+	info->num_message_handler_workers = ClusterManager::getNumMessageHandlerWorkers();
+	info->namespace_enabled = !ClusterManager::getDisableRemote();
+	info->disable_remote_connect = ClusterManager::getDisableRemoteConnect();
+	info->disable_autowait = ClusterManager::getDisableAutowait();
+	info->eager_weak_fetch = ClusterManager::getEagerWeakFetch();
+	info->eager_send = ClusterManager::getEagerSend();
+	info->merge_release_and_finish = ClusterManager::getMergeReleaseAndFinish();
+	info->reserved_leader_thread = CPUManager::hasReservedCPUforLeaderThread();
+	info->group_messages_enabled = ClusterManager::getGroupMessagesEnabled();
+	info->write_id_enabled = WriteIDManager::isEnabled();
+
+	info->virtual_region_start = _singleton->_dataInit._virtualAllocation.getStartAddress();
+	info->virtual_region_size = _singleton->_dataInit._virtualAllocation.getSize();
+
+	info->distributed_region_start = _singleton->_dataInit._virtualDistributedRegion.getStartAddress();
+	info->distributed_region_size = _singleton->_dataInit._virtualDistributedRegion.getSize();
+
+	return 0;
+}

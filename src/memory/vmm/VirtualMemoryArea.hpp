@@ -17,34 +17,29 @@
 
 #include <sys/mman.h>
 
-class VirtualMemoryArea {
-	//! start address of the area
-	const void *_start;
+class VirtualMemoryArea  : public DataAccessRegion {
+	char *_nextFree;       // next free pointer in the area
 
-	//! size of the area
-	const size_t _size;
+	size_t _available;     // amount of available memory
 
-	//! first address not belonging in the area
-	const void *_end;
-
-	//! next free pointer in the area
-	char *_nextFree;
-
-	//! amount of available memory
-	size_t _available;
-
-	size_t _count_allocs;
+	size_t _count_allocs;  // counter of allocations.
 
 public:
-	VirtualMemoryArea(const void *address, size_t size)
-		: _start(address), _size(size), _end((char *)_start + _size),
-		_nextFree((char *)_start), _available(size), _count_allocs(0)
+	VirtualMemoryArea(void *address, size_t size)
+		: DataAccessRegion(address, size),
+		_nextFree((char *)address), _available(size), _count_allocs(0)
 	{
-		assert(_size > 0);
 		assert(_available > 0);
+		assert(this->getStartAddress() != nullptr);
+		assert(this->getSize() > 0);
 	}
 
-	//! Virtual addresses should be unique, so can't copy this
+	VirtualMemoryArea(const DataAccessRegion &region)
+		: VirtualMemoryArea(region.getStartAddress(), region.getSize())
+	{
+	}
+
+	//! Virtual addresses should be unique.
 	VirtualMemoryArea(VirtualMemoryArea const &) = delete;
 	VirtualMemoryArea operator=(VirtualMemoryArea const &) = delete;
 
@@ -52,20 +47,10 @@ public:
 	{
 	}
 
-	inline const void *getAddress() const
-	{
-		return _start;
-	}
-
-	inline size_t getSize() const
-	{
-		return _size;
-	}
-
 	/** Returns a block of virtual address from the virtual memory area.
 	 *
-	 * This method is not thread-safe. Synchronization needs to be handled
-	 * externaly. */
+	 * This method is not thread-safe. Synchronization needs to be handled externally.
+	 */
 	inline void *allocBlock(size_t size)
 	{
 		/** Rounding up the size allocations to PAGE_SIZE is the easy
@@ -75,7 +60,8 @@ public:
 			FatalErrorHandler::warn(
 				"VirtualMemoryArea wanted: ", size,
 				" bytes but only: ", _available, " are available.",
-				" vm_start: ", _start, " size: ", _size, " allocations: ", _count_allocs
+				" vm_start: ", getStartAddress(), " size: ", getSize(),
+				" allocations: ", _count_allocs
 			);
 			return nullptr;
 		}
@@ -86,19 +72,10 @@ public:
 		_nextFree += size;
 		++_count_allocs;
 
+		// This assertion also prevents overflows
+		assert(_available <= getSize());
+
 		return ret;
-	}
-
-	inline bool includesRange(const void *address, size_t size) const
-	{
-		const char *endAddress = (char *)address + size;
-
-		return (address >= _start) && (endAddress < _end);
-	}
-
-	inline bool includesAddress(const void *address) const
-	{
-		return (address >= _start) && (address < _end);
 	}
 };
 

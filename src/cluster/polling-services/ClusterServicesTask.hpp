@@ -20,7 +20,6 @@ class ClusterServicesTask {
 
 	// Defined in ClusterManager.cpp
 	static std::atomic<size_t> _activeClusterTaskServices;
-	static std::atomic<bool> _pausedServices;
 
 	//! Functions for tasks
 	template <typename T>
@@ -28,7 +27,7 @@ class ClusterServicesTask {
 	{
 		_activeClusterTaskServices.fetch_add(1);
 
-		while (_pausedServices.load() || T::executeService()) {
+		while (T::executeService()) {
 			nanos6_wait_for(TIMEOUT);
 		}
 
@@ -62,6 +61,11 @@ class ClusterServicesTask {
 
 public:
 
+	inline static int count()
+	{
+		return _activeClusterTaskServices;
+	}
+
 	inline static void initializeWorkers(int numWorkers)
 	{
 		for(int i = 0; i < numWorkers; ++i) {
@@ -69,16 +73,12 @@ public:
 		}
 	}
 
-	inline static void setPauseStatus(bool pause)
-	{
-		_pausedServices.store(pause);
-	}
-
 	inline static void shutdownWorkers(int numWorkers)
 	{
-		for(int i = 0; i < numWorkers; ++i) {
+		for (int i = 0; i < numWorkers; ++i) {
 			unregisterService<ClusterPollingServices::ClusterWorker<Message>>();
 		}
+
 		// To assert shutdown the services before the CPUManager
 		// Wait for cluster polling services before returning
 		while (_activeClusterTaskServices.load() > 0) {}

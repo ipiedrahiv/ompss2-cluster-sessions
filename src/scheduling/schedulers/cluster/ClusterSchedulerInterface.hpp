@@ -196,15 +196,21 @@ public:
 		ReadyTaskHint hint = NO_HINT
 	) override {
 
-		int clusterhint = handleClusterSchedulerConstrains(task, computePlace, hint);
+		int clusterhint = nanos6_cluster_no_offload;
 
-		if (clusterhint == nanos6_cluster_no_hint) {
-			clusterhint = _defaultScheduler->getScheduledNode(task, computePlace, hint);
+		if (ClusterManager::inClusterMode()) {
+			clusterhint = handleClusterSchedulerConstrains(task, computePlace, hint);
+
+			if (clusterhint == nanos6_cluster_no_hint) {
+				clusterhint = _defaultScheduler->getScheduledNode(task, computePlace, hint);
+			}
+
+			if (clusterhint == nanos6_cluster_no_schedule) {
+				return;
+			}
 		}
 
-		if (clusterhint != nanos6_cluster_no_schedule) {
-			addReadyLocalOrExecuteRemote(clusterhint, task, computePlace, hint);
-		}
+		addReadyLocalOrExecuteRemote(clusterhint, task, computePlace, hint);
 	};
 
 	Task *stealTask()

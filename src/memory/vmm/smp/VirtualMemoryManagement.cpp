@@ -80,7 +80,7 @@ void VirtualMemoryManagement::setupMemoryLayout(
 			numaSize += HardwareInfo::getPageSize();
 			extraPages--;
 		}
-		_localNUMAVMA[nodeId].push_back(new VirtualMemoryArea(ptr, numaSize));
+		_singleton->_localNUMAVMA[nodeId].push_back(new VirtualMemoryArea(ptr, numaSize));
 		ptr += numaSize;
 	}
 }

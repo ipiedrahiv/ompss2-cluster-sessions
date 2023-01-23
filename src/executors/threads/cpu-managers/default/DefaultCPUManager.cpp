@@ -22,23 +22,6 @@ size_t DefaultCPUManager::_numIdleCPUs;
 
 void DefaultCPUManager::preinitialize()
 {
-	_finishedCPUInitialization = false;
-
-	if (ClusterManager::inClusterMode()) {
-		// In cluster mode, the LeaderThread is necessary, otherwise the
-		// polling services (which manage communication with other nodes) may
-		// not be run frequently enough, causing a high latency on
-		// communications. This has been observed to be a problem in test
-		// cases. But the LeaderThread normally overallocates a CPU, which
-		// means that it can preempt a worker thread that is holding the
-		// scheduler lock. In this case, no new tasks can be scheduled until
-		// all the messages have been handled.  Therefore, in cluster mode,
-		// leave one CPU free to be used by the LeaderThread.
-		_reserveCPUforLeaderThread = true;
-	} else {
-		_reserveCPUforLeaderThread = false;
-	}
-
 	// Retreive the CPU mask of this process
 	int rc = sched_getaffinity(0, sizeof(cpu_set_t), &_cpuMask);
 	FatalErrorHandler::handle(rc, " when retrieving the affinity of the process");
@@ -144,16 +127,14 @@ void DefaultCPUManager::preinitialize()
 	_numIdleCPUs = 0;
 
 	// Initialize the virtual CPU for the leader thread
-	if (_reserveCPUforLeaderThread) {
-		_leaderThreadCPU = _cpus[numAvailableCPUs - 1];
-	} else {
-		_leaderThreadCPU = new CPU(numCPUs);
-	}
+	_leaderThreadCPU = (_reserveCPUforLeaderThread ? _cpus[numAvailableCPUs - 1] : new CPU(numCPUs));
 	assert(_leaderThreadCPU != nullptr);
 }
 
 void DefaultCPUManager::initialize()
 {
+	const size_t nWorkers = _cpus.size() - _reserveCPUforLeaderThread;
+
 	for (size_t id = 0; id < _cpus.size(); ++id) {
 		CPU *cpu = _cpus[id];
 		assert(cpu != nullptr);
@@ -161,10 +142,9 @@ void DefaultCPUManager::initialize()
 		__attribute__((unused)) bool worked = cpu->initializeIfNeeded();
 		assert(worked);
 
-		if (id == _cpus.size() - 1 && _reserveCPUforLeaderThread) {
-			// reserve last CPU for the leader thread (not CPU zero which
-			// always runs main when running with Extrae)
-		} else {
+		// reserve last CPU for the leader thread (not CPU zero which
+		// always runs main when running with Extrae)
+		if (id < nWorkers) {
 			WorkerThread *initialThread = ThreadManager::createWorkerThread(cpu);
 			assert(initialThread != nullptr);
 			initialThread->resume(cpu, true);
@@ -177,12 +157,11 @@ void DefaultCPUManager::initialize()
 void DefaultCPUManager::shutdownPhase1()
 {
 	// Notify all CPUs that the runtime is shutting down
-	for (size_t id = 0; id < _cpus.size(); ++id) {
-		if (id == _cpus.size() - 1 && _reserveCPUforLeaderThread) {
-			// reserve last CPU for the leader thread
-		} else {
-			DefaultCPUActivation::shutdownCPU(_cpus[id]);
-		}
+	// reserve last CPU for the leader thread if _reserveCPUforLeaderThread
+	const size_t nWorkers = _cpus.size() - _reserveCPUforLeaderThread;
+
+	for (size_t id = 0; id < nWorkers; ++id) {
+		DefaultCPUActivation::shutdownCPU(_cpus[id]);
 	}
 }
 

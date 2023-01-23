@@ -21,17 +21,17 @@ class MemoryPlace;
 class VirtualMemoryManagement {
 private:
 	//! Default allocation size for OS memory allocations
-	static size_t _size;
+	size_t _size;
 
 	//! Memory allocations from OS
-	static std::vector<VirtualMemoryAllocation *> _allocations;
+	std::vector<VirtualMemoryAllocation *> _allocations;
 
 	//! Addresses for local NUMA allocations
 	typedef std::vector<VirtualMemoryArea *> node_allocations_t;
-	static std::vector<node_allocations_t> _localNUMAVMA;
+	std::vector<node_allocations_t> _localNUMAVMA;
 
 	typedef PaddedSpinLock<> vmm_lock_t;
-	static vmm_lock_t _lock;
+	vmm_lock_t _lock;
 
 	//! \brief Set up the memory layout based
 	//!
@@ -41,7 +41,7 @@ private:
 	//! \param allocation represents the OS memory allocation.
 	//! \param[in] nodes is the collections of NUMA nodes among which the allocation will
 	//! be divided
-	static void setupMemoryLayout(
+	void setupMemoryLayout(
 		VirtualMemoryAllocation *allocation,
 		const std::vector<MemoryPlace *> &nodes
 	);
@@ -51,6 +51,8 @@ private:
 	{
 	}
 
+	static VirtualMemoryManagement *_singleton;
+
 public:
 
 	static void initialize();
@@ -59,7 +61,7 @@ public:
 
 	//! \brief Allocate a block of generic addresses.
 	//! At the moment we redirect this to malloc
-	static inline void *allocDistrib(size_t size)
+	inline void *allocDistrib(size_t size)
 	{
 		return malloc(size);
 	}
@@ -128,7 +130,6 @@ public:
 	{
 		return false;
 	}
-
 };
 
 

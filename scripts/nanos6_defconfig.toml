@@ -43,6 +43,10 @@
 	# Possible values: "default", "idle", "busy", "lewi", "greedy"
 	policy = "busy"
 
+	# Keep one CPU for the leader thread IF in cluster mode OR malleability is enabled.
+	# This is usefull for cluster polling services
+	reserve_cpu_leader = true
+
 [taskfor]
 	# Choose the total number of CPU groups that will execute the worksharing tasks (taskfors). Default
 	# is none (not set), which means that the runtime will create one taskfor group per NUMA node
@@ -315,6 +319,9 @@ __require_CLUSTER
 	disable_remote = false
 	# Disable remote connect (direct propagation between namespaces). Default is true
 	disable_remote_connect = true
+	# Use the writeID to reduce redundant data transfers.
+	# This one inhibits two optimizations: Whe writeID AND the pending queue check
+	enable_write_id = true
 	# Disable the "autowait" feature, which disables early release for accesses of offloaded
 	# tasks that are not propagated in the remote namespace. Default is false
 	disable_autowait = false
@@ -322,6 +329,9 @@ __require_CLUSTER
 	eager_weak_fetch = true
 	# Enable eager send of all dependencies. Default is false
 	eager_send = false
+	# Group the satisfiability and release messages when possible.
+	# This should be always enabled.
+	group_messages = true
 	# Merge release and Finish messages when possible. Default
 	# true.  When this is true dataacesses release messages for
 	# different tasks can be merged and finalization into a single
@@ -330,6 +340,21 @@ __require_CLUSTER
 	# Number of spawned tasks to help with message handling, in addition to the polling service
 	# itself. Default is 2.
 	num_message_handler_workers = 2
+
+	# Limit number of nodes to use on malleability. When this
+	# variable is zero malleability is disabled
+	num_max_nodes = 0
+
+	# Possible values for spawn policies are:
+	# group: Spawn all at once
+	# host: Spawn by host groups (like single when 1 ppn)
+	# single: Spawn processes individually (time consuming)
+	default_spawn_policy = "host"
+
+	# Possible values for the transfer policy are:
+	# lazy: Transfer data selectively form exiting ranks
+	# eager: Transfer everything to it's home node.
+	default_shrink_transfer_policy = "lazy"
 
 	[cluster.auto]
 		# Optimize non-accessed parts of auto accesses

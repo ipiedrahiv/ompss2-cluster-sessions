@@ -18,8 +18,11 @@ public:
 		//! Address pointer.
 		DataAccessRegion _region;
 
-		//! Cluster size in allocation moment.
+		//! Cluster size on last redistribution.
 		size_t _clusterSize;
+
+		//! Cluster size when allocated the first time
+		const size_t _clusterInitialSize;
 
 		//! distribution policy for the region
 		nanos6_data_distribution_t _policy;
@@ -38,9 +41,19 @@ public:
 		DmallocDataInfo(
 			const DataAccessRegion &region, size_t clusterSize,
 			nanos6_data_distribution_t policy, size_t nrDim, const size_t *dimensions
-		) : _region(region), _clusterSize(clusterSize), _policy(policy), _nrDim(nrDim)
+		) : _region(region), _clusterSize(clusterSize), _clusterInitialSize(clusterSize),
+			_policy(policy), _nrDim(nrDim)
 		{
 			memcpy(_dimensions, dimensions, nrDim * sizeof(size_t));
+		}
+
+		friend std::ostream& operator<<(std::ostream& out, const DmallocDataInfo& in)
+		{
+			out << "Region:" << in._region
+				<< " allocationSize:" << in._clusterInitialSize
+				<< " clusterSize:" << in._clusterSize;
+
+			return out;
 		}
 	};
 
@@ -49,10 +62,7 @@ public:
 private:
 	dmalloc_container_t _dmallocs;
 
-	void registerDmalloc(
-		const DmallocDataInfo *dmallocDataInfo,
-		Task *task, size_t clusterSize
-	);
+	void registerDmalloc(const DmallocDataInfo *dmallocDataInfo, Task *task);
 	bool unregisterDmalloc(DataAccessRegion const &region);
 
 	static ClusterMemoryManagement _singleton;
