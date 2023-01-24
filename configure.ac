@@ -237,6 +237,7 @@ else
 fi
 AM_CONDITIONAL([USE_CLUSTER], [test x${ac_use_cluster} = x"yes"])
 AM_CONDITIONAL([HAVE_MPI], [test x${ac_use_cluster} = x"yes"])
+AM_CONDITIONAL([HAVE_SLURM], [test x${ac_use_cluster} = x"yes"])
 
 if test x"${ac_use_cluster}" = x"yes" ; then
 	AC_DEFINE([USE_CLUSTER], [1], [Define if Cluster is enabled.])
