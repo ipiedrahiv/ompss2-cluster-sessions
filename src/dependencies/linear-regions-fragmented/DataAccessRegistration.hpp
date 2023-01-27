@@ -45,14 +45,22 @@ namespace DataAccessRegistration {
 	//! \brief Performs the task dependency registration procedure
 	//!
 	//! \param[in] task the Task whose dependencies need to be calculated
-	//!
-	//! \returns true if the task is already ready
-	bool registerTaskDataAccesses(
+	void registerTaskDataAccesses(
 		Task *task,
 		ComputePlace *computePlace,
 		CPUDependencyData &dependencyData
 	);
 
+	//! \brief Completes the task dependency registration procedure
+	//!
+	//! \param[in] task the Task whose dependencies have been calculated
+	//!
+	//! \returns true if the task is already ready
+	bool checkSubmittedTaskReady(
+		Task *task,
+		ComputePlace *computePlace,
+		CPUDependencyData &dependencyData
+	);
 
 	void processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks(
 		CPUDependencyData &hpDependencyData,

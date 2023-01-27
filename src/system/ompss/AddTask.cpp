@@ -245,7 +245,21 @@ void AddTask::submitTask(Task *task, Task *parent, bool fromUserCode)
 		TrackingPoints::taskIsPending(task);
 
 		// No need to stop hardware counters, as the task was created just now
-		ready = DataAccessRegistration::registerTaskDataAccesses(
+
+		// Register the task's data accesses and exit with a "lock" on the task
+		// (by increasing the number of predecessors).
+		DataAccessRegistration::registerTaskDataAccesses(
+			task,
+			computePlace,
+			computePlace->getDependencyData()
+		);
+
+		// Check whether the submitted task is ready and release the "lock". After
+		// this point it is only valid to dereference task if ready = true. If ready=false,
+		// it is possible that another thread makes the task ready and theoretically it could
+		// even be executed to completion and deleted (so dereferencing it would be a
+		// use-after-free).
+		ready = DataAccessRegistration::checkSubmittedTaskReady(
 			task,
 			computePlace,
 			computePlace->getDependencyData()

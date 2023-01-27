@@ -4655,14 +4655,11 @@ namespace DataAccessRegistration {
 	 * After registering all the individual task data accesses in this way,
 	 * they are linked to existing parent and sibling accesses.
 	 */
-	bool registerTaskDataAccesses(
+	void registerTaskDataAccesses(
 		Task *task,
 		ComputePlace *computePlace,
 		CPUDependencyData &hpDependencyData
 	) {
-
-		bool ready; /* return value: true if task is ready immediately */
-
 		assert(task != nullptr);
 		assert(computePlace != nullptr);
 
@@ -4707,6 +4704,17 @@ namespace DataAccessRegistration {
 				assert(hpDependencyData._inUse.compare_exchange_strong(alreadyTaken, false));
 			}
 #endif
+		}
+	}
+
+	bool checkSubmittedTaskReady(
+		Task *task,
+		__attribute__((unused)) ComputePlace *computePlace,
+		CPUDependencyData &hpDependencyData
+	) {
+		bool ready; /* return value: true if task is ready immediately */
+
+		if (!task->getDataAccesses()._accesses.empty()) {
 			/*
 			 * Remove the two extra predecessors. The task may become ready.
 			 */
@@ -4740,7 +4748,6 @@ namespace DataAccessRegistration {
 
 		return ready;
 	}
-
 
 	/*
 	 * Release a region accessed by a task
