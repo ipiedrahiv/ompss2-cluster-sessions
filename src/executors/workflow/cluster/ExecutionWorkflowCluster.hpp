@@ -88,7 +88,7 @@ namespace ExecutionWorkflow {
 			_task(access->getOriginator()),
 			_read(access->readSatisfied()),
 			_write(access->writeSatisfied()),
-			_weak(access->isWeak()),
+			_weak(access->getOriginalWasWeak()),
 			_accessType(access->getType()),
 			_reductionTypeAndOperatorIndex(access->getReductionTypeAndOperatorIndex()),
 			_reductionIndex(access->getReductionIndex()),

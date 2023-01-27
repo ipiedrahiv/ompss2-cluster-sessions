@@ -87,6 +87,7 @@ private:
 		IS_STRONG_LOCAL_ACCESS,
 		AUTO_HAS_BEEN_ACCESSED_BIT,
 		AUTO_READONLY_BIT,
+		ORIGINAL_WAS_STRONG_BIT,
 		TOTAL_STATUS_BITS
 	};
 
@@ -984,6 +985,20 @@ public:
 		return ClusterManager::getCurrentMemoryNode()->getIndex();
 	}
 
+	// Convert a strong access to weak (used for the local copy of an offloaded task)
+	void convertToWeak()
+	{
+		assert(!isWeak());
+		assert(!_status[ORIGINAL_WAS_STRONG_BIT]);
+		_weak = true; // The local task's access is now weak
+		_status[ORIGINAL_WAS_STRONG_BIT] = true; // But the original access was strong
+	}
+
+	// Check whether the original access was weak
+	bool getOriginalWasWeak() const
+	{
+		return isWeak() && !_status[ORIGINAL_WAS_STRONG_BIT];
+	}
 
 	//! Function that return is this access can be merged to other into a single one.
 	//! \param[in] other A DataAccess before this.

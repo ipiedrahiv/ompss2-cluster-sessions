@@ -51,6 +51,15 @@ namespace DataAccessRegistration {
 		CPUDependencyData &dependencyData
 	);
 
+	//! \brief Convert the accesses of a task from strong to weak
+	//!
+	//! \param[in] task the Task whose dependencies need to be calculated
+	void convertLocalTaskToWeakAccesses(
+		Task *task,
+		ComputePlace *computePlace,
+		CPUDependencyData &dependencyData
+	);
+
 	//! \brief Completes the task dependency registration procedure
 	//!
 	//! \param[in] task the Task whose dependencies have been calculated

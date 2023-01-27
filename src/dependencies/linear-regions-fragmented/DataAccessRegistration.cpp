@@ -4707,6 +4707,43 @@ namespace DataAccessRegistration {
 		}
 	}
 
+	void convertLocalTaskToWeakAccesses(
+		Task *task,
+		ComputePlace *computePlace,
+		CPUDependencyData &hpDependencyData
+	) {
+		assert(task != nullptr);
+		assert(computePlace != nullptr);
+
+		TaskDataAccesses &accessStructures = task->getDataAccesses();
+		assert(!accessStructures.hasBeenDeleted());
+		std::lock_guard<TaskDataAccesses::spinlock_t> guard(accessStructures._lock);
+
+		accessStructures._accesses.processAll(
+			[&](TaskDataAccesses::accesses_t::iterator position) -> bool {
+				DataAccess *access = &(*position);
+				if (!access->isWeak()
+					&& (access->getType() == READ_ACCESS_TYPE
+						|| access->getType() == WRITE_ACCESS_TYPE
+						|| access->getType() == READWRITE_ACCESS_TYPE)) {
+
+					/* Change the access to weak */
+					DataAccessStatusEffects initialStatus(access);
+					access->convertToWeak();
+					DataAccessStatusEffects updatedStatus(access);
+
+					/* Process the changes between initialStatus and updatedStatus */
+					handleDataAccessStatusChanges(
+						initialStatus, updatedStatus,
+						access, accessStructures, task,
+						hpDependencyData);
+				}
+				return true;
+			}
+		);
+		processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks(hpDependencyData, computePlace, true);
+	}
+
 	bool checkSubmittedTaskReady(
 		Task *task,
 		__attribute__((unused)) ComputePlace *computePlace,

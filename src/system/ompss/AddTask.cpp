@@ -229,6 +229,7 @@ void AddTask::submitTask(Task *task, Task *parent, bool fromUserCode)
 
 	bool ready = true;
 	const nanos6_task_info_t *taskInfo = task->getTaskInfo();
+	const bool isIf0 = task->isIf0();
 
 	assert(taskInfo != 0);
 
@@ -254,6 +255,22 @@ void AddTask::submitTask(Task *task, Task *parent, bool fromUserCode)
 			computePlace->getDependencyData()
 		);
 
+		// If the task will be offloaded, then convert the accesses of the
+		// local task from strong to weak. This must be done while holding the
+		// above "lock".  Note: we could inspect the task accesses and
+		// pre-allocate the task to a specific node.
+		if (!isIf0
+			&& task->getConstraints()->node >= 0
+			&& task->getConstraints()->node != ClusterManager::getCurrentClusterNode()->getIndex()) {
+			// The task will be offloaded: so convert the local task's strong
+			// accesses to weak (since the local task only offloads the task).
+			DataAccessRegistration::convertLocalTaskToWeakAccesses(
+				task,
+				computePlace,
+				computePlace->getDependencyData()
+			);
+		}
+
 		// Check whether the submitted task is ready and release the "lock". After
 		// this point it is only valid to dereference task if ready = true. If ready=false,
 		// it is possible that another thread makes the task ready and theoretically it could
@@ -265,8 +282,6 @@ void AddTask::submitTask(Task *task, Task *parent, bool fromUserCode)
 			computePlace->getDependencyData()
 		);
 	}
-
-	const bool isIf0 = task->isIf0();
 
 #ifndef USE_EXEC_WORKFLOW
 	// Without workflow: queue the task if ready and not if0. Device if0 ready
