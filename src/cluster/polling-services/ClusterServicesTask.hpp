@@ -25,8 +25,6 @@ class ClusterServicesTask {
 	template <typename T>
 	static void bodyClusterService(__attribute__((unused)) void *args)
 	{
-		_activeClusterTaskServices.fetch_add(1);
-
 		while (T::executeService()) {
 			nanos6_wait_for(TIMEOUT);
 		}
@@ -68,6 +66,9 @@ public:
 
 	inline static void initializeWorkers(int numWorkers)
 	{
+		// Increase the number of active cluster services immediately
+		_activeClusterTaskServices.fetch_add(numWorkers);
+
 		for(int i = 0; i < numWorkers; ++i) {
 			registerService<ClusterPollingServices::ClusterWorker<Message>>("ClusterWorker");
 		}
