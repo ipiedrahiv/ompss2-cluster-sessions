@@ -36,7 +36,7 @@ namespace ExecutionWorkflow {
 		__attribute__((unused))DataAccess *access,
 		__attribute__((unused))CPUDependencyData &hpDependencyData
 	) {
-		return new Step();
+		return nullptr;
 	}
 
 	extern transfers_map_t _transfersMap;

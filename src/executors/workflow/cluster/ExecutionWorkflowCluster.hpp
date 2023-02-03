@@ -528,8 +528,7 @@ namespace ExecutionWorkflow {
 		//! || The source and the destination is the same
 		//! || I already have the data.
 		if (source->isClusterLocalMemoryPlace()) {
-			// NULL copy (do nothing, just release succesor and delete itself.)
-			return new Step();
+			return nullptr;
 		}
 
 		if (WriteIDManager::checkWriteIDLocal(access->getWriteID(), region)) {
@@ -548,7 +547,7 @@ namespace ExecutionWorkflow {
 					access, ClusterManager::getCurrentMemoryNode(), hpDependencyData
 				);
 			}
-			return new Step();
+			return nullptr;
 		}
 
 		// Helpful warning messages in debug build

@@ -406,8 +406,10 @@ namespace ExecutionWorkflow {
 					hpDependencyData2
 				);
 
-				workflow->enforceOrder(dataCopyRegionStep, executionStep);
-				workflow->addRootStep(dataCopyRegionStep);
+				if (dataCopyRegionStep != nullptr) {
+					workflow->enforceOrder(dataCopyRegionStep, executionStep);
+					workflow->addRootStep(dataCopyRegionStep);
+				}
 
 				releaseStep->addAccess(dataAccess);
 
@@ -513,7 +515,6 @@ namespace ExecutionWorkflow {
 
 		Workflow *workflow = new Workflow();
 
-
 		Step *notificationStep = new NotificationStep(
 			[task, region, workflow]() -> void {
 				/* We cannot re-use the 'computePlace', we need to
@@ -556,8 +557,12 @@ namespace ExecutionWorkflow {
 			hpDependencyData
 		);
 
-		workflow->addRootStep(copyStep);
-		workflow->enforceOrder(copyStep, notificationStep);
+		if (copyStep) {
+			workflow->addRootStep(copyStep);
+			workflow->enforceOrder(copyStep, notificationStep);
+		} else {
+			workflow->addRootStep(notificationStep);
+		}
 		workflow->start();
 		Instrument::exitSetupTaskwaitWorkflow();
 	}
