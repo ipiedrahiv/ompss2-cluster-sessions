@@ -499,10 +499,25 @@ namespace ExecutionWorkflow {
 
 		DataAccessRegion region = taskwaitFragment->getAccessRegion();
 
+		Step *copyStep = nullptr;
 		MemoryPlace const *targetLocation = taskwaitFragment->getOutputLocation();
 
+		if (targetLocation != nullptr) {
+			MemoryPlace const *currLocation = taskwaitFragment->getLocation();
+
+			// Create copyStep (will be nullptr if no copy required)
+			copyStep = Workflow::createDataCopyStep(
+				currLocation,
+				targetLocation,
+				region,
+				taskwaitFragment,
+				true,
+				hpDependencyData
+			);
+		}
+
 		//! No need to perform any copy for this taskwait fragment
-		if (targetLocation == nullptr) {
+		if (copyStep == nullptr) {
 			DataAccessRegistration::releaseTaskwaitFragment(
 				task,
 				region,
@@ -546,23 +561,8 @@ namespace ExecutionWorkflow {
 			}
 		);
 
-		MemoryPlace const *currLocation = taskwaitFragment->getLocation();
-
-		Step *copyStep = Workflow::createDataCopyStep(
-			currLocation,
-			targetLocation,
-			region,
-			taskwaitFragment,
-			true,
-			hpDependencyData
-		);
-
-		if (copyStep) {
-			workflow->addRootStep(copyStep);
-			workflow->enforceOrder(copyStep, notificationStep);
-		} else {
-			workflow->addRootStep(notificationStep);
-		}
+		workflow->addRootStep(copyStep);
+		workflow->enforceOrder(copyStep, notificationStep);
 		workflow->start();
 		Instrument::exitSetupTaskwaitWorkflow();
 	}
