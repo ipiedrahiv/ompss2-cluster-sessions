@@ -61,7 +61,7 @@ namespace ExecutionWorkflow {
 		//!	       need to copy data to. This cannot be NULL.
 		//! \param[in] region is the memory region to copy.
 		//! \param[in] access is the DataAccess to which this copy step relates.
-		Step *createDataCopyStep(
+		static Step *createDataCopyStep(
 			MemoryPlace const *sourceMemoryPlace,
 			MemoryPlace const *targetMemoryPlace,
 			DataAccessRegion const &region,

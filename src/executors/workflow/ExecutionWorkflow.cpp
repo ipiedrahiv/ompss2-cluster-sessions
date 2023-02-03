@@ -397,7 +397,7 @@ namespace ExecutionWorkflow {
 					delete homeNodes;
 				}
 #endif
-				Step *dataCopyRegionStep = workflow->createDataCopyStep(
+				Step *dataCopyRegionStep = Workflow::createDataCopyStep(
 					currLocation,
 					targetMemoryPlace,
 					region,
@@ -548,7 +548,7 @@ namespace ExecutionWorkflow {
 
 		MemoryPlace const *currLocation = taskwaitFragment->getLocation();
 
-		Step *copyStep = workflow->createDataCopyStep(
+		Step *copyStep = Workflow::createDataCopyStep(
 			currLocation,
 			targetLocation,
 			region,
