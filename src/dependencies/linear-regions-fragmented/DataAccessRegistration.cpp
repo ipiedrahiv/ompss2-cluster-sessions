@@ -1446,7 +1446,8 @@ namespace DataAccessRegistration {
 				);
 
 				/* Modifications to be done after the lock is taken  */
-				DataAccessStatusEffects initialStatus(newLocalAccess);
+				DataAccessStatusEffects initialStatus;
+
 				newLocalAccess->setNewInstrumentationId(task->getInstrumentationTaskId());
 
 				newLocalAccess->setReadSatisfied(access->getLocation());
@@ -3730,7 +3731,8 @@ namespace DataAccessRegistration {
 					return true;
 				}
 
-				DataAccessStatusEffects initialStatus(dataAccess);
+				DataAccessStatusEffects initialStatus;
+
 				dataAccess->setNewInstrumentationId(task->getInstrumentationTaskId());
 
 				/* New task accesses always in the bottom map */
@@ -4124,7 +4126,7 @@ namespace DataAccessRegistration {
 
 			// No need for symbols in a taskwait
 
-			DataAccessStatusEffects initialStatus(taskwaitFragment);
+			DataAccessStatusEffects initialStatus;
 			taskwaitFragment->setNewInstrumentationId(task->getInstrumentationTaskId());
 			taskwaitFragment->setInBottomMap();
 			taskwaitFragment->setRegistered();
@@ -5186,7 +5188,8 @@ namespace DataAccessRegistration {
 			);
 
 			/* Modifications to be done after the lock is taken  */
-			DataAccessStatusEffects initialStatus(newLocalAccess);
+			DataAccessStatusEffects initialStatus;
+
 			newLocalAccess->setNewInstrumentationId(task->getInstrumentationTaskId());
 
 			const MemoryPlace *loc = location ? location : Directory::getDirectoryMemoryPlace();
