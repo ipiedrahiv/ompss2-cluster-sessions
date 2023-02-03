@@ -445,10 +445,8 @@ namespace TaskOffloading {
 
 				// Propagate satisfiability embedded in the Message
 				for (size_t i = 0; i < numSatInfo; ++i) {
-					if (satInfo[i]._readSat
-						|| satInfo[i]._writeSat
-						|| (satInfo[i]._id != OffloadedTaskIdManager::InvalidOffloadedTaskId)) {
-						propagateSatisfiability(task, satInfo[i], cpu, satInfo[i]._id, hpDependencyData);
+					if (satInfo[i]._readSat || satInfo[i]._writeSat) {
+						propagateSatisfiability(task, satInfo[i], cpu, OffloadedTaskIdManager::InvalidOffloadedTaskId, hpDependencyData);
 					}
 				}
 
