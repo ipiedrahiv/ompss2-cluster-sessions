@@ -713,6 +713,9 @@ namespace DataAccessRegistration {
 	static inline DataAccess *fragmentAccess(
 		DataAccess *dataAccess, DataAccessRegion const &region,
 		TaskDataAccesses &accessStructures);
+	static inline DataAccess *fragmentAccessObject(
+		DataAccess *dataAccess, DataAccessRegion const &region,
+		TaskDataAccesses &accessStructures);
 	static inline DataAccess *createAccess(
 		Task *originator,
 		DataAccessObjectType objectType,
@@ -1363,7 +1366,7 @@ namespace DataAccessRegistration {
 				assert(!originalAccess->hasBeenDiscounted());
 
 				originalAccess =
-					fragmentAccess(originalAccess,
+					fragmentAccessObject(originalAccess,
 						access->getAccessRegion(),
 						accessStructures);
 
@@ -2821,7 +2824,7 @@ namespace DataAccessRegistration {
 							assert(hpDependencyData.empty());
 						}
 
-						previous = fragmentAccess(previous, missingRegion, parentAccessStructures);
+						previous = fragmentFragmentObject(previous, missingRegion, parentAccessStructures);
 
 						/*
 						 *Now that the bottom map entry has been created, pass it
@@ -2910,7 +2913,8 @@ namespace DataAccessRegistration {
 							assert(hpDependencyData.empty());
 						}
 
-						previous = fragmentAccess(previous, missingRegion, parentAccessStructures);
+						// previous = fragmentFragmentObject(previous, missingRegion, parentAccessStructures);
+						assert (previous->getAccessRegion().fullyContainedIn(missingRegion));
 
 						/*
 						 *Now that the bottom map entry has been created, pass it
@@ -3430,7 +3434,7 @@ namespace DataAccessRegistration {
 								);
 							}
 
-							targetAccess = fragmentAccess(targetAccess, previousRegion, accessStructures);
+							targetAccess = fragmentAccessObject(targetAccess, previousRegion, accessStructures);
 
 							DataAccessStatusEffects initialStatusT(targetAccess);
 
@@ -3563,7 +3567,7 @@ namespace DataAccessRegistration {
 								hpDependencyData);
 						}
 
-						targetAccess = fragmentAccess(targetAccess, missingRegion, accessStructures);
+						targetAccess = fragmentAccessObject(targetAccess, missingRegion, accessStructures);
 
 						DataAccessStatusEffects initialStatus(targetAccess);
 						//! If this is a remote task, we will receive satisfiability
@@ -3819,7 +3823,7 @@ namespace DataAccessRegistration {
 	) {
 		// Fragment the data access if necessary (then continue with the first
 		// fragment - remaining fragments will be processed later)
-		dataAccess = fragmentAccess(dataAccess, region, accessStructures);
+		dataAccess = fragmentAccessObject(dataAccess, region, accessStructures);
 		assert(dataAccess != nullptr);
 
 		bool hasSubaccesses = dataAccess->hasSubaccesses();
@@ -3834,7 +3838,7 @@ namespace DataAccessRegistration {
 					assert(fragment != nullptr);
 					assert(!fragment->hasBeenDiscounted());
 
-					fragment = fragmentAccess(fragment, finalRegion, accessStructures);
+					fragment = fragmentFragmentObject(fragment, finalRegion, accessStructures);
 					assert(fragment != nullptr);
 
 					processor(fragment);
@@ -4881,7 +4885,7 @@ namespace DataAccessRegistration {
 						releaseLocation = location;
 					}
 
-					dataAccess = fragmentAccess(dataAccess, region, accessStructures);
+					dataAccess = fragmentAccessObject(dataAccess, region, accessStructures);
 
 					if (dataAccess->getType() != REDUCTION_ACCESS_TYPE) {
 					// But defer reductions to notification step, in case waiting for the original access
@@ -5102,7 +5106,7 @@ namespace DataAccessRegistration {
 				 * registered region may fragment an existing access.
 				 */
 				assert(region.fullyContainedIn(access->getAccessRegion()));
-				access = fragmentAccess(access, region, accessStructures);
+				access = fragmentAccessObject(access, region, accessStructures);
 
 				// Note: it is tempting to change the access, if it is weak,
 				// into a strong one (calling access->upgrade). But there is no
@@ -5240,7 +5244,7 @@ namespace DataAccessRegistration {
 						// If the fragment has a next and the location is already wrong then there is a problem
 						assert(!fragment->hasNext() || fragment->getLocation() == location);
 
-						fragment = fragmentAccess(fragment, region, accessStructures);
+						fragment = fragmentAccessObject(fragment, region, accessStructures);
 						DataAccessStatusEffects initialStatus(fragment);
 						fragment->setLocation(location);
 						if (location->isClusterLocalMemoryPlace()) {
@@ -5295,7 +5299,7 @@ namespace DataAccessRegistration {
 				/*
 				 * Fragment access, as only part inside region becomes complete.
 				 */
-				access = fragmentAccess(access, region, accessStructures);
+				access = fragmentAccessObject(access, region, accessStructures);
 				
 				if (access->isStrongLocalAccess()) {
 					access->unsetIsStrongLocalAccess();
@@ -5356,7 +5360,7 @@ namespace DataAccessRegistration {
 
 					/* Fragment the access (if not fully contained inside the region).
 					   Given that the use case is dmalloc/dfree it seems unlikely. */
-					fragment = fragmentAccess(fragment, region,
+					fragment = fragmentFragmentObject(fragment, region,
 						accessStructures);
 
 					/* Set access as complete */
@@ -6291,7 +6295,7 @@ namespace DataAccessRegistration {
 						assert (!access->hasNext());
 
 						if (access->isInBottomMap()) {
-							access = fragmentAccess(access, region, accessStructures);
+							access = fragmentAccessObject(access, region, accessStructures);
 							DataAccessStatusEffects initialStatus(access);
 							access->unsetInBottomMap();
 							DataAccessStatusEffects updatedStatus(access);
@@ -6325,7 +6329,7 @@ namespace DataAccessRegistration {
 				assert(dataAccess != nullptr);
 				assert(!dataAccess->complete());
 				assert(!dataAccess->hasBeenDiscounted());
-				dataAccess = fragmentAccess(dataAccess, region, accessStructures);
+				dataAccess = fragmentAccessObject(dataAccess, region, accessStructures);
 
 				if (dataAccess->getType() == AUTO_ACCESS_TYPE && ClusterManager::autoOptimizeNonAccessed()) {
 					DataAccessStatusEffects initialStatus(dataAccess);
