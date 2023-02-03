@@ -777,9 +777,7 @@ namespace DataAccessRegistration {
 			}
 		}
 
-		if (!updatedStatus._isRegistered) {
-			return;
-		}
+		assert(updatedStatus._isRegistered);
 
 		// NOTE: After this point, all actions assume the access is registered
 
