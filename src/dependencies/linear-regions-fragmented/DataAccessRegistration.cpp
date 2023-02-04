@@ -1343,7 +1343,6 @@ namespace DataAccessRegistration {
 		/* OUT */ CPUDependencyData &hpDependencyData,
 		bool noflush
 	) {
-		(void)hpDependencyData;
 		assert(access != nullptr);
 		assert(task != nullptr);
 		assert(access->getOriginator() == task);
@@ -1403,31 +1402,18 @@ namespace DataAccessRegistration {
 					originalAccess->setWriteID(access->getWriteID());
 				}
 
-				if (originalAccess->getLocation()->isClusterLocalMemoryPlace()
-					|| !location->isClusterLocalMemoryPlace()) {
-					// Either the original access was already local or the new location
-					// is non-local. In either case, we only need to update the location
-					// and writeID of the original access.
-					if (originalAccess->getType() != READ_ACCESS_TYPE) {
+				if (originalAccess->getType() != READ_ACCESS_TYPE) {
+					// Non reads: update the location for the new data
+					originalAccess->setLocation(location);
+				} else {
+					if ((!originalAccess->getLocation()->isClusterLocalMemoryPlace()
+						&& location->isClusterLocalMemoryPlace())) {
+						// Read: update the location only if the old location is
+						// remote and the new location is local.
 						originalAccess->setLocation(location);
 					}
-				} else {
-					// Updating the location of the original access from a non-local to
-					// a local location may cause read satisfiability to be propagated to
-					// the next access. This is the logic in disableReadPropagationToNext
-					// which reduces unnecessary data fetches that would otherwise happen
-					// from the old location. Note: it is important that the fragments
-					// have already been removed, since when there are fragments the
-					// logic to propagate satisfiability does not take account of
-					// disableReadPropagationToNext.
-					DataAccessStatusEffects initialStatus(originalAccess);
-					originalAccess->setLocation(location);
-					DataAccessStatusEffects updatedStatus(originalAccess);
-					handleDataAccessStatusChanges(
-						initialStatus, updatedStatus,
-						originalAccess, accessStructures, originalAccess->getOriginator(),
-						hpDependencyData);
 				}
+
 				return true;
 			},
 			[&](DataAccessRegion missingRegion) -> bool {
@@ -6067,10 +6053,8 @@ namespace DataAccessRegistration {
 			}
 		);
 
-		// If removing the bottom map taskwait / top level sink set the
-		// location of an access from non-local to local, we may need to
-		// propagate read satisfiability to the next task (which may also
-		// make it ready). Do it now.
+		// Removing the bottom map taskwait / top level sink may create
+		// delayed operations rarely when using the auto clause.
 		if (!hpDependencyData.empty()) {
 			accessStructures._lock.unlock();
 			processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks(
