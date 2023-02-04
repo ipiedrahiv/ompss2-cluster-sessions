@@ -634,6 +634,8 @@ namespace ExecutionWorkflow {
 		//! here.
 		if (objectType == taskwait_type && !needsTransfer) {
 			access->setOutputLocation(nullptr);
+			assert(!registerLocation);
+			return nullptr;
 		}
 
 		return new ClusterDataCopyStep(
