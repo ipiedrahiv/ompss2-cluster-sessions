@@ -383,13 +383,11 @@ namespace ExecutionWorkflow {
 			}
 
 			_infoLock.lock();
-			_releaseInfo.push_back(
-				MessageReleaseAccess::ReleaseAccessInfo(
+			_releaseInfo.emplace_back( // MessageReleaseAccess::ReleaseAccessInfo
 					region,
 					access->getWriteID(),
 					clusterLocation,
-					eagerReleaseTag)
-			);
+					eagerReleaseTag);
 
 			_infoLock.unlock();
 		}
@@ -487,15 +485,13 @@ namespace ExecutionWorkflow {
 			//assert(_lock.isLockedByThisThread());
 
 			// Satisfiability info to send to target
-			_satInfo.push_back(
-				TaskOffloading::SatisfiabilityInfo(
+			_satInfo.emplace_back( // TaskOffloading::SatisfiabilityInfo
 					region, source,
 					read, write,
 					weak, accessType,
 					reductionTypeAndOperatorIndex,
 					reductionIndex,
-					writeID, namespacePredecessorId, eagerWeakSendTag)
-			);
+					writeID, namespacePredecessorId, eagerWeakSendTag);
 		}
 
 		//! Start the execution of the Step
