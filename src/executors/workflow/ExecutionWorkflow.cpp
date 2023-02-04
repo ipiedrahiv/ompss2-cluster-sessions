@@ -123,7 +123,7 @@ namespace ExecutionWorkflow {
 			return new ClusterDataReleaseStep(task->getClusterContext(), task);
 		}
 
-		return new DataReleaseStep(task);
+		return nullptr; // Data release step not needed when executed locally
 	}
 
 
@@ -341,8 +341,13 @@ namespace ExecutionWorkflow {
 		// TODO: Once we have correct management for the Task symbols here we should create the
 		// corresponding allocation steps.
 		DataReleaseStep *releaseStep = workflow->createDataReleaseStep(task);
-		workflow->enforceOrder(executionStep, releaseStep);
-		workflow->enforceOrder(releaseStep, notificationStep);
+		if (releaseStep) {
+			workflow->enforceOrder(executionStep, releaseStep);
+			workflow->enforceOrder(releaseStep, notificationStep);
+		} else {
+			workflow->enforceOrder(executionStep, notificationStep);
+		}
+
 
 		// We must use local dependency data here, not the CPU's dependency data. This is because
 		// we may currently be creating the workflow for an offloaded task, which happens inside
@@ -411,7 +416,9 @@ namespace ExecutionWorkflow {
 					workflow->addRootStep(dataCopyRegionStep);
 				}
 
-				releaseStep->addAccess(dataAccess);
+				if (releaseStep) {
+					releaseStep->addAccess(dataAccess);
+				}
 
 				// Special handling of data copies for reductions, as these copies
 				// cannot (always) happen before the task executes. These data copies
