@@ -1643,11 +1643,12 @@ if DISCRETE_DEPENDENCIES
 nodist_libnanos6_optimized_discrete_la_SOURCES += $(common_sources) $(noinstrument_sources) $(memory_default_sources) $(discrete_dependency_sources) $(nodist_common_sources)
 endif
 
+if BUILD_OPTIMIZED
 libnanos6_optimized_regions_la_CPPFLAGS = -DNDEBUG $(common_libnanos6_cppflags) $(memory_default_cppflags) -I$(srcdir)/src/instrument/null
 libnanos6_optimized_regions_la_CXXFLAGS = $(OPT_CXXFLAGS) $(AM_CXXFLAGS) $(regions_dependency_flags)
 libnanos6_optimized_regions_la_LDFLAGS = $(common_libnanos6_ldflags)
 nodist_libnanos6_optimized_regions_la_SOURCES = $(common_sources) $(noinstrument_sources) $(memory_default_sources) $(regions_dependency_sources) $(nodist_common_sources)
-
+endif
 
 # Optimized ctf variants
 libnanos6_optimized_discrete_ctf_la_CPPFLAGS = -DNDEBUG $(common_libnanos6_cppflags) $(memory_default_cppflags) -I$(srcdir)/src/instrument/ctf

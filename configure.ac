@@ -374,6 +374,14 @@ _AS_ECHO([])
 _AS_ECHO([   clock LIBS... ${CLOCK_LIBS}])
 
 _AS_ECHO([])
+_AS_ECHO_N([   Optimization is enabled... ])
+if test x"${ac_build_optimized}" = x"yes" ; then
+	AC_MSG_RESULT([yes])
+else
+	AC_MSG_RESULT([no])
+fi
+
+_AS_ECHO([])
 _AS_ECHO_N([   Extrae is enabled... ])
 if test x"${have_extrae}" = x"yes" ; then
 	AC_MSG_RESULT([yes])

@@ -163,6 +163,28 @@ AC_DEFUN([SELECT_NANOS6_INSTRUMENTATIONS],
 		)
 		AC_MSG_RESULT([$ac_build_verbose_instrumentation])
 		AM_CONDITIONAL(BUILD_VERBOSE_INSTRUMENTATION, test x"${ac_build_verbose_instrumentation}" = x"yes")
+
+		AC_MSG_CHECKING([whether to build the optimized variant])
+		AC_ARG_ENABLE(
+			[optimized],
+			[AS_HELP_STRING([--disable-optimized], [build the optimized variant])],
+			[
+				case "${enableval}" in
+				yes)
+					ac_build_optimized=yes
+					;;
+				no)
+					ac_build_optimized=no
+					;;
+				*)
+					AC_MSG_ERROR([bad value ${enableval} for --enable-optimized])
+					;;
+				esac
+			],
+			[ac_build_optimized=yes]
+		)
+		AC_MSG_RESULT([$ac_build_optimized])
+		AM_CONDITIONAL(BUILD_OPTIMIZED, test x"${ac_build_optimized}" = x"yes")
 	]
 )
 
