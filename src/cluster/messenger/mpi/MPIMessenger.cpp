@@ -241,11 +241,7 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 			// Run in pure OmpSs-2@Cluster mode
 			_apprankNum = 0;
 			_numAppranks = 1;
-			int n = _numExternalRanks / _numNodes;
-			if (_physicalNodeNum < (_numExternalRanks % _numNodes)) {
-				n++;
-			}
-			_numInstancesThisNode = n;
+			_numInstancesThisNode = calcNumInstancesThisNode();
 
 			for (int i = 0; i < _numInstancesThisNode; ++i) {
 				bool isMasterInstance = (i==0) && (_physicalNodeNum==0); /* first instance on first node */
@@ -360,6 +356,25 @@ MPIMessenger::~MPIMessenger()
 	assert(RequestContainer<Message>::isCleared());
 	assert(RequestContainer<DataTransfer>::isCleared());
 #endif // NDEBUG
+}
+
+// Only needed in pure OmpSs-2@Cluster mode: check how many processes there are on
+// the current node.
+size_t MPIMessenger::calcNumInstancesThisNode()
+{
+	// Make a temporary communicator of all ranks with the same _physicalNodeNum
+	MPI_Comm tempNodeComm;
+	int ret = MPI_Comm_split(
+		MPI_COMM_WORLD,
+		/* color */ _physicalNodeNum,
+		/* key */ _externalRank,
+		&tempNodeComm
+	);
+	int numInstancesThisNode = 0;
+	ret = MPI_Comm_size(tempNodeComm, &numInstancesThisNode);
+	ret = MPI_Comm_free(&tempNodeComm);
+	MPIErrorHandler::handle(ret, INTRA_COMM);
+	return numInstancesThisNode;
 }
 
 void MPIMessenger::shareDLBInfo()

@@ -152,6 +152,7 @@ private:
 	void shareDLBInfo();
 
 	void messengerReinitialize(bool willdie);
+	size_t calcNumInstancesThisNode();
 
 public:
 
