@@ -507,42 +507,35 @@ namespace ExecutionWorkflow {
 
 		const DataAccessType type = access->getType();
 		const DataAccessRegion region = access->getAccessRegion();
-		const DataAccessObjectType objectType = access->getObjectType();
-		const bool isDistributedRegion = VirtualMemoryManagement::isDistributedRegion(region);
 		const bool isWeak = access->isWeak();
+		const DataAccessObjectType objectType = access->getObjectType();
+		const bool isTaskwait = (objectType == taskwait_type);
+		assert(objectType == taskwait_type || objectType == access_type);
 
 		//! The source device is a host MemoryPlace of the current
 		//! ClusterNode. We do not really need to perform a
 		//! DataTransfer
-		//! || The source and the destination is the same
-		//! || I already have the data.
 		if (source->isClusterLocalMemoryPlace()) {
 			return nullptr;
 		}
 
 		if (WriteIDManager::checkWriteIDLocal(access->getWriteID(), region)) {
 			// It is present locally, even though the location for this particular
-			// data access says otherwise. Update the location to reflect the fact that the
-			// data is local, otherwise disableReadPropagationToNext will not pass read
-			// satisfiability to the successor until the access is complete. Note: this
-			// may create delayed operations (passing the read satisfiability, which is
-			// why this function needs hpDependencyData).
+			// data access says otherwise. Just update the location.
 			Instrument::dataFetch(Instrument::EarlyWriteID, region);
-			if (!access->isWeak() && access->getType() != READ_ACCESS_TYPE) {
+			if (!isWeak && type != READ_ACCESS_TYPE) {
 				access->setNewLocalWriteID();
 			}
 			if (access->readSatisfied()) {
-				assert(!access->getLocation()->isClusterLocalMemoryPlace());
 				access->setLocation(ClusterManager::getCurrentMemoryNode());
 			}
 			return nullptr;
 		}
 
-		// Helpful warning messages in debug build
-
+		// Helpful warning messages
 		if (region.getSize() > (1UL<<60)) {
 			FatalErrorHandler::failIf(
-				(objectType == access_type && type != NO_ACCESS_TYPE && !isWeak),
+				(!isTaskwait && type != NO_ACCESS_TYPE && !isWeak),
 				"Large access ", region,
 				" for task ", access->getOriginator()->getLabel(),
 				" is not weak"
@@ -566,6 +559,8 @@ namespace ExecutionWorkflow {
 			);
 		}
 
+		const bool isDistributedRegion = VirtualMemoryManagement::isDistributedRegion(region);
+
 		bool needsTransfer =
 			(
 			 	//! We need a DataTransfer for a taskwait access
@@ -586,14 +581,14 @@ namespace ExecutionWorkflow {
 				//!
 				//! In both cases, we can avoid the copy if the
 				//! access is a read-only access.
-			 	(objectType == taskwait_type)
+				isTaskwait
 				&& (type != READ_ACCESS_TYPE)
 				&& (type != NO_ACCESS_TYPE || !isDistributedRegion)
 				&& !source->isDirectoryMemoryPlace()
 			) || (
 				//! We need a DataTransfer for an access_type
 				//! access, if the access is not write-only
-			 	(objectType == access_type)
+				!isTaskwait
 				&& (type != WRITE_ACCESS_TYPE)
 				&& !(type == REDUCTION_ACCESS_TYPE && access->getOriginator()->isRemoteTask())
 				//! and if it is not in the directory (which would mean
@@ -603,8 +598,8 @@ namespace ExecutionWorkflow {
 				//! Also don't eagerly fetch weak concurrent or auto accesses, as usually we will
 				//! only access part of them.
 				&& (!isWeak || (ClusterManager::getEagerWeakFetch()
-				                && access->getType() != CONCURRENT_ACCESS_TYPE
-				                && access->getType() != AUTO_ACCESS_TYPE)
+				                && type != CONCURRENT_ACCESS_TYPE
+				                && type != AUTO_ACCESS_TYPE)
 							|| (type == REDUCTION_ACCESS_TYPE && !access->getOriginator()->isRemoteTask()))
 			);
 
@@ -617,7 +612,7 @@ namespace ExecutionWorkflow {
 			//! If it is a taskwait that doesn't need a transfer, then clear the
 			//! output location to tell handleExitTaskwait that it hasn't been copied
 			//! here.
-			if (objectType == taskwait_type) {
+			if (isTaskwait) {
 				access->setOutputLocation(nullptr);
 			} else {
 				if (!isWeak) {
@@ -625,7 +620,7 @@ namespace ExecutionWorkflow {
 					// to be set to the current node.
 					access->setLocation(target);
 
-					if (access->isWeak() || access->getType() == READ_ACCESS_TYPE) {
+					if (isWeak || type == READ_ACCESS_TYPE) {
 						// Weak or read-only access: register the existing Write ID
 						// as local
 						WriteIDManager::registerWriteIDasLocal(access->getWriteID(), access->getAccessRegion());
@@ -644,7 +639,7 @@ namespace ExecutionWorkflow {
 			source, target, inregion,
 			access->getOriginator(),
 			access->getWriteID(),
-			objectType == taskwait_type,
+			isTaskwait,
 			isWeak
 		);
 	}
