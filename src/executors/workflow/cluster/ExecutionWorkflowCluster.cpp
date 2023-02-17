@@ -270,9 +270,7 @@ namespace ExecutionWorkflow {
 		Task *task,
 		WriteID writeID,
 		bool isTaskwait,
-		bool isWeak,
-		bool needsTransfer,
-		bool registerLocation
+		bool isWeak
 	) : Step(),
 		_sourceMemoryPlace(sourceMemoryPlace),
 		_targetMemoryPlace(targetMemoryPlace),
@@ -281,9 +279,7 @@ namespace ExecutionWorkflow {
 		_task(task),
 		_writeID(writeID),
 		_isTaskwait(isTaskwait),
-		_isWeak(isWeak),
-		_needsTransfer(needsTransfer),
-		_registerLocation(registerLocation)
+		_isWeak(isWeak)
 	{
 #ifndef NDEBUG
 		assert(ClusterManager::getCurrentMemoryNode() == _targetMemoryPlace);
@@ -291,17 +287,8 @@ namespace ExecutionWorkflow {
 
 		assert(_sourceMemoryPlace != _targetMemoryPlace);
 
-		if (_registerLocation) {
-			assert(!_needsTransfer);
-		}
-
-		if (_sourceMemoryPlace->isDirectoryMemoryPlace()) {
-			assert(!_needsTransfer);
-		}
-
-		if (_needsTransfer) {
-			assert(_sourceMemoryPlace->getType() == nanos6_cluster_device);
-		}
+		assert (!_sourceMemoryPlace->isDirectoryMemoryPlace());
+		assert(_sourceMemoryPlace->getType() == nanos6_cluster_device);
 #endif
 	}
 
@@ -314,27 +301,23 @@ namespace ExecutionWorkflow {
 		// class.
 
 		bool lateWriteID = false;
-		if (_needsTransfer && WriteIDManager::checkWriteIDLocal(_writeID, _fullRegion)) {
+
+		if (WriteIDManager::checkWriteIDLocal(_writeID, _fullRegion)) {
 			// Second chance: now it is found by write ID, so in the end just register the
 			// location.
 			lateWriteID = true;
 			Instrument::dataFetch(Instrument::LateWriteID, _fullRegion);
 		}
 
-		if (_registerLocation || lateWriteID) {
+		if (lateWriteID) {
 			//! This access doesn't need a transfer. But we need to update the task location
 			//! to match the target node.
-			assert(!_needsTransfer || lateWriteID);
-
 			DataAccessRegistration::updateTaskDataAccessLocation(
 				_task,
 				_fullRegion,
 				_targetMemoryPlace,
 				_isTaskwait
 			);
-		}
-
-		if (!_needsTransfer || lateWriteID) {
 			releaseSuccessors();
 			delete this;
 			return false;

@@ -198,11 +198,6 @@ namespace ExecutionWorkflow {
 		//! The access is weak
 		const bool _isWeak;
 
-		//! An actual data transfer is required
-		const bool _needsTransfer;
-
-		const bool _registerLocation;
-
 		DataTransfer::transfer_callback_t _postcallback;
 
 	public:
@@ -213,9 +208,7 @@ namespace ExecutionWorkflow {
 			Task *task,
 			WriteID writeID,
 			bool isTaskwait,
-			bool isWeak,
-			bool needsTransfer,
-			bool registerLocation
+			bool isWeak
 		);
 
 		//! Start the execution of the Step
@@ -507,7 +500,7 @@ namespace ExecutionWorkflow {
 		MemoryPlace const *target,
 		DataAccessRegion const &inregion,
 		DataAccess *access,
-		CPUDependencyData &hpDependencyData
+		__attribute__((unused)) CPUDependencyData &hpDependencyData
 	) {
 		assert(source != nullptr);
 		assert(target == ClusterManager::getCurrentMemoryNode());
@@ -539,9 +532,8 @@ namespace ExecutionWorkflow {
 				access->setNewLocalWriteID();
 			}
 			if (access->readSatisfied()) {
-				DataAccessRegistration::setLocationFromWorkflow(
-					access, ClusterManager::getCurrentMemoryNode(), hpDependencyData
-				);
+				assert(!access->getLocation()->isClusterLocalMemoryPlace());
+				access->setLocation(ClusterManager::getCurrentMemoryNode());
 			}
 			return nullptr;
 		}
@@ -621,16 +613,30 @@ namespace ExecutionWorkflow {
 		//! (WRITE_ACCESS_TYPE), because the task will write the new data contents.
 		//! It also happens when the data was previously uninitialized (was in
 		//! the directory) even on an in or inout dependency.
-		bool registerLocation = !needsTransfer
-			&& objectType != taskwait_type
-			&& !isWeak;
+		if (!needsTransfer) {
+			//! If it is a taskwait that doesn't need a transfer, then clear the
+			//! output location to tell handleExitTaskwait that it hasn't been copied
+			//! here.
+			if (objectType == taskwait_type) {
+				access->setOutputLocation(nullptr);
+			} else {
+				if (!isWeak) {
+					// A strong access that doesn't need a transfer just needs the location
+					// to be set to the current node.
+					access->setLocation(target);
 
-		//! If it is a taskwait that doesn't need a transfer, then clear the
-		//! output location to tell handleExitTaskwait that it hasn't been copied
-		//! here.
-		if (objectType == taskwait_type && !needsTransfer) {
-			access->setOutputLocation(nullptr);
-			assert(!registerLocation);
+					if (access->isWeak() || access->getType() == READ_ACCESS_TYPE) {
+						// Weak or read-only access: register the existing Write ID
+						// as local
+						WriteIDManager::registerWriteIDasLocal(access->getWriteID(), access->getAccessRegion());
+					} else {
+						// Otherwise make a new write ID for our updated
+						// version and register it as local.
+						access->setNewLocalWriteID();
+					}
+				}
+			}
+			// No transfer so no copy step needed
 			return nullptr;
 		}
 
@@ -639,9 +645,7 @@ namespace ExecutionWorkflow {
 			access->getOriginator(),
 			access->getWriteID(),
 			objectType == taskwait_type,
-			isWeak,
-			needsTransfer,
-			registerLocation
+			isWeak
 		);
 	}
 
