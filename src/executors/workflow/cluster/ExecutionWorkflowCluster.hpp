@@ -562,7 +562,10 @@ namespace ExecutionWorkflow {
 		const bool isDistributedRegion = VirtualMemoryManagement::isDistributedRegion(region);
 
 		bool needsTransfer =
-			(
+			//! Not in the directory (which would mean that the
+			// data is not yet initialized)
+			!source->isDirectoryMemoryPlace()
+			&& ((
 			 	//! We need a DataTransfer for a taskwait access
 				//! in the following cases:
 				//! 1) the access is not a NO_ACCESS_TYPE, so it
@@ -584,16 +587,12 @@ namespace ExecutionWorkflow {
 				isTaskwait
 				&& (type != READ_ACCESS_TYPE)
 				&& (type != NO_ACCESS_TYPE || !isDistributedRegion)
-				&& !source->isDirectoryMemoryPlace()
 			) || (
 				//! We need a DataTransfer for an access_type
 				//! access, if the access is not write-only
 				!isTaskwait
 				&& (type != WRITE_ACCESS_TYPE)
 				&& !(type == REDUCTION_ACCESS_TYPE && access->getOriginator()->isRemoteTask())
-				//! and if it is not in the directory (which would mean
-				//! that the data is not yet initialized)
-				&& !source->isDirectoryMemoryPlace()
 				//! and, if it is a weak access, then only if cluster.eager_weak_fetch == true.
 				//! Also don't eagerly fetch weak concurrent or auto accesses, as usually we will
 				//! only access part of them.
@@ -601,7 +600,7 @@ namespace ExecutionWorkflow {
 				                && type != CONCURRENT_ACCESS_TYPE
 				                && type != AUTO_ACCESS_TYPE)
 							|| (type == REDUCTION_ACCESS_TYPE && !access->getOriginator()->isRemoteTask()))
-			);
+			));
 
 		//! If no data transfer is needed, then register the new location if
 		//! it is a task with a non-weak access. This happens for out dependencies
