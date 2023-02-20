@@ -559,34 +559,14 @@ namespace ExecutionWorkflow {
 			);
 		}
 
-		const bool isDistributedRegion = VirtualMemoryManagement::isDistributedRegion(region);
-
 		bool needsTransfer =
 			//! Not in the directory (which would mean that the
 			// data is not yet initialized)
 			!source->isDirectoryMemoryPlace()
 			&& ((
-			 	//! We need a DataTransfer for a taskwait access
-				//! in the following cases:
-				//! 1) the access is not a NO_ACCESS_TYPE, so it
-				//!    is part of the calling task's dependencies,
-				//!    which means that the latest version of
-				//!    the region needs to be present in the
-				//!    context of the task at all times.
-				//! 2) the access is a NO_ACCESS_TYPE access, so
-				//!    it represents a region allocated within
-				//!    the context of the Task but it is local
-				//!    memory, so it needs to be present in the
-				//!    context of the Task after the taskwait.
-				//!    Distributed memory regions, do not need
-				//!    to trigger a DataCopy, since anyway can
-				//!    only be accessed from within subtasks.
-				//!
-				//! In both cases, we can avoid the copy if the
-				//! access is a read-only access.
+				//! Taskwait noflush and taskwait covering memory dmalloc'ed by the same
+				//! task do not get the output location set by the dependency system.
 				isTaskwait
-				&& (type != READ_ACCESS_TYPE)
-				&& (type != NO_ACCESS_TYPE || !isDistributedRegion)
 			) || (
 				//! We need a DataTransfer for an access_type
 				//! access, if the access is not write-only
@@ -601,6 +581,16 @@ namespace ExecutionWorkflow {
 				                && type != AUTO_ACCESS_TYPE)
 							|| (type == REDUCTION_ACCESS_TYPE && !access->getOriginator()->isRemoteTask()))
 			));
+
+		if (isTaskwait)
+		{
+			// These taskwaits do not require transfers, but they should not get
+			// this far, as the dependency system should not set an output location
+			// for them.
+			__attribute__((unused)) const bool isDistributedRegion = VirtualMemoryManagement::isDistributedRegion(region);
+			assert((type != READ_ACCESS_TYPE)
+					&& (type != NO_ACCESS_TYPE || !isDistributedRegion));
+		}
 
 		//! If no data transfer is needed, then register the new location if
 		//! it is a task with a non-weak access. This happens for out dependencies

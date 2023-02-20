@@ -4125,7 +4125,12 @@ namespace DataAccessRegistration {
 
 			if (fetchData) {
 				assert(computePlace != nullptr);
-				taskwaitFragment->setOutputLocation(computePlace->getMemoryPlace(0));
+				if ((accessType != READ_ACCESS_TYPE) // if parent had a read, then we'd know the data hasn't been modified
+					&& (accessType != NO_ACCESS_TYPE
+						|| !VirtualMemoryManagement::isDistributedRegion(region)) // otherwise parent dmalloc'ed the region
+						) {
+					taskwaitFragment->setOutputLocation(computePlace->getMemoryPlace(0));
+				}
 			}
 			if (dontRelease) {
 				taskwaitFragment->setDisableEagerSend();
