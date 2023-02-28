@@ -229,6 +229,7 @@ void AddTask::submitTask(Task *task, Task *parent, bool fromUserCode)
 
 	bool ready = true;
 	const nanos6_task_info_t *taskInfo = task->getTaskInfo();
+	const bool isIf0 = task->isIf0();
 
 	assert(taskInfo != 0);
 
@@ -245,14 +246,42 @@ void AddTask::submitTask(Task *task, Task *parent, bool fromUserCode)
 		TrackingPoints::taskIsPending(task);
 
 		// No need to stop hardware counters, as the task was created just now
-		ready = DataAccessRegistration::registerTaskDataAccesses(
+
+		// Register the task's data accesses and exit with a "lock" on the task
+		// (by increasing the number of predecessors).
+		DataAccessRegistration::registerTaskDataAccesses(
+			task,
+			computePlace,
+			computePlace->getDependencyData()
+		);
+
+		// If the task will be offloaded, then convert the accesses of the
+		// local task from strong to weak. This must be done while holding the
+		// above "lock".  Note: we could inspect the task accesses and
+		// pre-allocate the task to a specific node.
+		if (!isIf0
+			&& task->getConstraints()->node >= 0
+			&& task->getConstraints()->node != ClusterManager::getCurrentClusterNode()->getIndex()) {
+			// The task will be offloaded: so convert the local task's strong
+			// accesses to weak (since the local task only offloads the task).
+			DataAccessRegistration::convertLocalTaskToWeakAccesses(
+				task,
+				computePlace,
+				computePlace->getDependencyData()
+			);
+		}
+
+		// Check whether the submitted task is ready and release the "lock". After
+		// this point it is only valid to dereference task if ready = true. If ready=false,
+		// it is possible that another thread makes the task ready and theoretically it could
+		// even be executed to completion and deleted (so dereferencing it would be a
+		// use-after-free).
+		ready = DataAccessRegistration::checkSubmittedTaskReady(
 			task,
 			computePlace,
 			computePlace->getDependencyData()
 		);
 	}
-
-	const bool isIf0 = task->isIf0();
 
 #ifndef USE_EXEC_WORKFLOW
 	// Without workflow: queue the task if ready and not if0. Device if0 ready

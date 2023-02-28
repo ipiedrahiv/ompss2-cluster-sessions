@@ -4655,14 +4655,11 @@ namespace DataAccessRegistration {
 	 * After registering all the individual task data accesses in this way,
 	 * they are linked to existing parent and sibling accesses.
 	 */
-	bool registerTaskDataAccesses(
+	void registerTaskDataAccesses(
 		Task *task,
 		ComputePlace *computePlace,
 		CPUDependencyData &hpDependencyData
 	) {
-
-		bool ready; /* return value: true if task is ready immediately */
-
 		assert(task != nullptr);
 		assert(computePlace != nullptr);
 
@@ -4707,6 +4704,54 @@ namespace DataAccessRegistration {
 				assert(hpDependencyData._inUse.compare_exchange_strong(alreadyTaken, false));
 			}
 #endif
+		}
+	}
+
+	void convertLocalTaskToWeakAccesses(
+		Task *task,
+		ComputePlace *computePlace,
+		CPUDependencyData &hpDependencyData
+	) {
+		assert(task != nullptr);
+		assert(computePlace != nullptr);
+
+		TaskDataAccesses &accessStructures = task->getDataAccesses();
+		assert(!accessStructures.hasBeenDeleted());
+		std::lock_guard<TaskDataAccesses::spinlock_t> guard(accessStructures._lock);
+
+		accessStructures._accesses.processAll(
+			[&](TaskDataAccesses::accesses_t::iterator position) -> bool {
+				DataAccess *access = &(*position);
+				if (!access->isWeak()
+					&& (access->getType() == READ_ACCESS_TYPE
+						|| access->getType() == WRITE_ACCESS_TYPE
+						|| access->getType() == READWRITE_ACCESS_TYPE)) {
+
+					/* Change the access to weak */
+					DataAccessStatusEffects initialStatus(access);
+					access->convertToWeak();
+					DataAccessStatusEffects updatedStatus(access);
+
+					/* Process the changes between initialStatus and updatedStatus */
+					handleDataAccessStatusChanges(
+						initialStatus, updatedStatus,
+						access, accessStructures, task,
+						hpDependencyData);
+				}
+				return true;
+			}
+		);
+		processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks(hpDependencyData, computePlace, true);
+	}
+
+	bool checkSubmittedTaskReady(
+		Task *task,
+		__attribute__((unused)) ComputePlace *computePlace,
+		CPUDependencyData &hpDependencyData
+	) {
+		bool ready; /* return value: true if task is ready immediately */
+
+		if (!task->getDataAccesses()._accesses.empty()) {
 			/*
 			 * Remove the two extra predecessors. The task may become ready.
 			 */
@@ -4740,7 +4785,6 @@ namespace DataAccessRegistration {
 
 		return ready;
 	}
-
 
 	/*
 	 * Release a region accessed by a task
