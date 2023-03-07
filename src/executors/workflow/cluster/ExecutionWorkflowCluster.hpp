@@ -77,7 +77,7 @@ namespace ExecutionWorkflow {
 			MemoryPlace const *sourceMemoryPlace,
 			MemoryPlace const *targetMemoryPlace,
 			DataAccess *access,
-			CPUDependencyData &hpDependencyData
+			__attribute__((unused)) CPUDependencyData &hpDependencyData
 		) : DataLinkStep(access),
 			_sourceMemoryPlace(sourceMemoryPlace),
 			_targetMemoryPlace(targetMemoryPlace),
@@ -134,16 +134,12 @@ namespace ExecutionWorkflow {
 									  && targetMemoryPlace != ClusterManager::getCurrentMemoryNode(),
 									  "weakcommutative accesses are not supported for offloaded tasks");
 
-			const int targetNamespace = targetMemoryPlace->getIndex();
-
 			/* Starting workflow on another node: set the namespace and predecessor task */
 			if (ClusterManager::getDisableRemote()) {
 				_namespacePredecessor = OffloadedTaskIdManager::InvalidOffloadedTaskId;
 			} else {
 				_namespacePredecessor = access->getNamespacePredecessor(); // remote propagation valid if predecessor task and offloading node matches
 			}
-
-			DataAccessRegistration::setNamespaceSelf(access, targetNamespace, hpDependencyData);
 		}
 
 		void linkRegion(

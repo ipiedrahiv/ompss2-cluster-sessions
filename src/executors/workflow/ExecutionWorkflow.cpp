@@ -71,11 +71,6 @@ namespace ExecutionWorkflow {
 				(targetMemoryPlace == currentMemoryPlace)
 					? nanos6_host_device : targetMemoryPlace->getType();
 
-		/* Starting workflow for a task on the host: not in a namespace */
-		if (targetType == nanos6_host_device) {
-			access->setValidNamespaceSelf(VALID_NAMESPACE_KNOWN);
-		}
-
 		if (sourceType == nanos6_host_device || sourceMemoryPlace == ClusterManager::getCurrentMemoryNode()) {
 			if (access->getObjectType() == access_type && !access->isWeak() && access->getType() != READ_ACCESS_TYPE) {
 				// Access already present, and the task will not modify the data (is weak or read-only access),

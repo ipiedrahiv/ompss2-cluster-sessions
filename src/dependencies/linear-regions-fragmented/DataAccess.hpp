@@ -140,7 +140,6 @@ private:
 	ExecutionWorkflow::DataLinkStep *_dataLinkStep;
 
 	int _validNamespacePrevious;
-	int _validNamespaceSelf;
 	OffloadedTaskIdManager::OffloadedTaskId _namespacePredecessor;
 
 	//! Translation offset for reductions of offloaded accesses
@@ -176,7 +175,6 @@ public:
 		_outputLocation(outputLocation),
 		_dataLinkStep(dataLinkStep),
 		_validNamespacePrevious(VALID_NAMESPACE_UNKNOWN),
-		_validNamespaceSelf(VALID_NAMESPACE_UNKNOWN),
 		_namespacePredecessor(OffloadedTaskIdManager::InvalidOffloadedTaskId),
 		_translationOffset(0)
 	{
@@ -209,7 +207,6 @@ public:
 		_outputLocation(other.getOutputLocation()),
 		_dataLinkStep(other.getDataLinkStep()),
 		_validNamespacePrevious(other.getValidNamespacePrevious()),
-		_validNamespaceSelf(other.getValidNamespaceSelf()),
 		_namespacePredecessor(other.getNamespacePredecessor()),
 		_translationOffset(other._translationOffset)
 	{}
@@ -653,7 +650,6 @@ public:
 		if (other->isStrongLocalAccess()) {
 			setIsStrongLocalAccess();
 		}
-		setValidNamespaceSelf(other->getValidNamespaceSelf());
 		setValidNamespacePrevious(VALID_NAMESPACE_KNOWN,
 			OffloadedTaskIdManager::InvalidOffloadedTaskId);
 	}
@@ -802,14 +798,6 @@ public:
 		return _validNamespacePrevious;
 	}
 
-	// Get the namespace node id for this access itself. It is the node
-	// on which the task is executed. Consider putting this information
-	// in the Task rather than the DataAccess.
-	int getValidNamespaceSelf() const
-	{
-		return _validNamespaceSelf;
-	}
-
 	OffloadedTaskIdManager::OffloadedTaskId getNamespacePredecessor() const
 	{
 		return _namespacePredecessor;
@@ -826,14 +814,6 @@ public:
 		_namespacePredecessor = namespacePredecessor;
 	}
 
-	// Set the namespace node id for this access itself. It is the node
-	// on which the task is executed, and it will be passed through the
-	// dependency system to the successor. Consider putting this information
-	// in the Task rather than the DataAccess.
-	void setValidNamespaceSelf(int validNamespaceSelf)
-	{
-		_validNamespaceSelf = validNamespaceSelf;
-	}
 
 	bool getPropagatedNamespaceInfo() const
 	{

@@ -940,12 +940,11 @@ namespace DataAccessRegistration {
 					}
 					updateOperation._namespaceAccessType = READ_ACCESS_TYPE;
 					access->setPropagatedNamespaceInfo();
-				} else if ((access->getObjectType() != access_type
-					|| access->getType() != READ_ACCESS_TYPE)
-					&& access->getValidNamespaceSelf() != VALID_NAMESPACE_UNKNOWN) {
+				} else if (access->getObjectType() != access_type
+					|| access->getType() != READ_ACCESS_TYPE) {
 					// Other object types or non-read accesses: propagate own namespace info
 					// to allow remote namespace propagation from this access to the next.
-					updateOperation._validNamespace = access->getValidNamespaceSelf();
+					updateOperation._validNamespace = VALID_NAMESPACE_KNOWN;
 					if (access->getObjectType() == fragment_type) {
 						updateOperation._namespacePredecessor = access->getOriginator()->getOffloadedTaskIdAsParent();
 					} else {
@@ -1444,7 +1443,6 @@ namespace DataAccessRegistration {
 					VALID_NAMESPACE_KNOWN,
 					OffloadedTaskIdManager::InvalidOffloadedTaskId
 				);
-				newLocalAccess->setValidNamespaceSelf(VALID_NAMESPACE_KNOWN);
 				newLocalAccess->setRegistered();
 		#ifndef NDEBUG
 				newLocalAccess->setReachable();
@@ -5182,7 +5180,6 @@ namespace DataAccessRegistration {
 				VALID_NAMESPACE_KNOWN,
 				OffloadedTaskIdManager::InvalidOffloadedTaskId
 			);
-			newLocalAccess->setValidNamespaceSelf(VALID_NAMESPACE_KNOWN);
 			newLocalAccess->setRegistered();
 	#ifndef NDEBUG
 			newLocalAccess->setReachable();
@@ -6184,25 +6181,6 @@ namespace DataAccessRegistration {
 			});
 
 		accessStruct._lock.unlock();
-	}
-
-	// NOTE: you must call setNamespaceSelf with the lock on the data structures
-	// Then call setNamespaceSelfDone without the lock
-	void setNamespaceSelf(DataAccess *access, __attribute__((unused)) int targetNamespace, CPUDependencyData &hpDependencyData)
-	{
-		// This is called with the lock on the task accesses already taken
-		Task *task = access->getOriginator();
-		TaskDataAccesses &accessStructures = task->getDataAccesses();
-		assert(!accessStructures.hasBeenDeleted());
-
-		DataAccessStatusEffects initialStatus(access);
-		access->setValidNamespaceSelf(VALID_NAMESPACE_KNOWN);
-		DataAccessStatusEffects updatedStatus(access);
-
-		handleDataAccessStatusChanges(
-			initialStatus, updatedStatus,
-			access, accessStructures, access->getOriginator(),
-			hpDependencyData);
 	}
 
 	// Remove a list of regions from the namespace's bottom map.
