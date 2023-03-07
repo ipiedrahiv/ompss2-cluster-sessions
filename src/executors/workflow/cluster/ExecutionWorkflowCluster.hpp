@@ -68,7 +68,6 @@ namespace ExecutionWorkflow {
 		reduction_index_t _reductionIndex;
 
 		OffloadedTaskIdManager::OffloadedTaskId _namespacePredecessor;
-		int _namespacePredecessorNode;
 		WriteID _writeID;
 
 		bool _started;
@@ -91,7 +90,6 @@ namespace ExecutionWorkflow {
 			_reductionTypeAndOperatorIndex(access->getReductionTypeAndOperatorIndex()),
 			_reductionIndex(access->getReductionIndex()),
 			_namespacePredecessor(OffloadedTaskIdManager::InvalidOffloadedTaskId),
-			_namespacePredecessorNode(VALID_NAMESPACE_UNKNOWN),
 			_writeID((access->getType() == COMMUTATIVE_ACCESS_TYPE) ? 0 : access->getWriteID()),
 			_started(false)
 		{
@@ -141,13 +139,8 @@ namespace ExecutionWorkflow {
 			/* Starting workflow on another node: set the namespace and predecessor task */
 			if (ClusterManager::getDisableRemote()) {
 				_namespacePredecessor = OffloadedTaskIdManager::InvalidOffloadedTaskId;
-				_namespacePredecessorNode = VALID_NAMESPACE_NONE;
 			} else {
-				if (access->getValidNamespacePrevious() == targetNamespace) {
-					assert(access->getType() != COMMUTATIVE_ACCESS_TYPE);
-				}
 				_namespacePredecessor = access->getNamespacePredecessor(); // remote propagation valid if predecessor task and offloading node matches
-				_namespacePredecessorNode = access->getValidNamespacePrevious();
 			}
 
 			DataAccessRegistration::setNamespaceSelf(access, targetNamespace, hpDependencyData);
