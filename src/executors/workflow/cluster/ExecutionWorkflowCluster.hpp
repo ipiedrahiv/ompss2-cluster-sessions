@@ -73,8 +73,6 @@ namespace ExecutionWorkflow {
 
 		bool _started;
 
-		bool _allowEagerSend;
-
 	public:
 		ClusterDataLinkStep(
 			MemoryPlace const *sourceMemoryPlace,
@@ -95,11 +93,7 @@ namespace ExecutionWorkflow {
 			_namespacePredecessor(OffloadedTaskIdManager::InvalidOffloadedTaskId),
 			_namespacePredecessorNode(VALID_NAMESPACE_UNKNOWN),
 			_writeID((access->getType() == COMMUTATIVE_ACCESS_TYPE) ? 0 : access->getWriteID()),
-			_started(false),
-			// Eager send is not compatible with weakconcurrent accesses, because
-			// an updated location is used to mean that the data was updated by
-			// a (strong) concurrent access.
-			_allowEagerSend(access->getType() != CONCURRENT_ACCESS_TYPE && access->getType() != WRITE_ACCESS_TYPE && access->getType() != REDUCTION_ACCESS_TYPE)
+			_started(false)
 		{
 			access->setDataLinkStep(this);
 
@@ -163,8 +157,7 @@ namespace ExecutionWorkflow {
 			DataAccess const *region,
 			bool read,
 			bool write,
-			TaskOffloading::SatisfiabilityInfoMap &satisfiabilityMap,
-			TaskOffloading::DataSendRegionInfoMap &dataSendRegionInfoMap) override;
+			TaskOffloading::SatisfiabilityInfoMap &satisfiabilityMap) override;
 
 		//! Start the execution of the Step
 		void start() override;
@@ -430,7 +423,6 @@ namespace ExecutionWorkflow {
 	class ClusterExecutionStep : public Step {
 	private:
 		TaskOffloading::SatisfiabilityInfoVector _satInfo;
-		TaskOffloading::DataSendRegionInfoVector _dataSendRegionInfo;
 		ClusterNode *_remoteNode;
 		Task *_task;
 
@@ -438,7 +430,6 @@ namespace ExecutionWorkflow {
 		ClusterExecutionStep(Task *task, ComputePlace *computePlace)
 			: Step(),
 			_satInfo(),
-			_dataSendRegionInfo(),
 			_remoteNode(dynamic_cast<ClusterNode *>(computePlace)),
 			_task(task)
 		{
@@ -551,7 +542,7 @@ namespace ExecutionWorkflow {
 			// is explicit, but when the weakinout is "all memory" there is too much
 			// chance of this kind of thing happening.
 			FatalErrorHandler::failIf(
-				(ClusterManager::getEagerWeakFetch() || ClusterManager::getEagerSend()),
+				ClusterManager::getEagerWeakFetch(),
 				"Set cluster.eager_send = false and cluster.eager_weak_fetch = false for large weak memory access ",
 				region,
 				" of task ",

@@ -60,24 +60,6 @@ namespace TaskOffloading {
 		}
 	}
 
-	static inline void handleEagerSend(SatisfiabilityInfo const &satInfo)
-	{
-		MemoryPlace const *loc =
-			(satInfo._src == -1) ? nullptr : ClusterManager::getMemoryNodeOrDirectory(satInfo._src);
-
-		if (satInfo._eagerSendTag != 0) {
-			assert (satInfo._reductionTypeAndOperatorIndex == no_reduction_type_and_operator);
-			assert(loc != nullptr);
-			assert(!loc->isDirectoryMemoryPlace());
-			DataTransfer *dt = ClusterManager::fetchDataRaw(satInfo._region, loc, satInfo._eagerSendTag, /* block */ false);
-			LiveDataTransfers::add(dt);
-			dt->addCompletionCallback([=]() {
-				WriteIDManager::registerWriteIDasLocal(satInfo._writeID, satInfo._region);
-			});
-			ClusterPollingServices::PendingQueue<DataTransfer>::addPending(dt);
-		}
-	}
-
 	static void propagateSatisfiability(
 		Task *localTask,
 		SatisfiabilityInfo const &satInfo,
@@ -94,7 +76,6 @@ namespace TaskOffloading {
 		MemoryPlace const *loc =
 			(satInfo._src == -1) ? nullptr : ClusterManager::getMemoryNodeOrDirectory(satInfo._src);
 
-		handleEagerSend(satInfo);
 		DataAccessRegistration::propagateSatisfiability(
 			localTask, satInfo._region, cpu,
 			hpDependencyData,
@@ -162,15 +143,13 @@ namespace TaskOffloading {
 		task->setEarlyRelease(nanos6_no_wait);
 	}
 
-	void sendSatisfiabilityAndDataSends(
-		SatisfiabilityInfoMap &satInfoMap,
-		DataSendRegionInfoMap &regionInfoMap
-	) {
+	void sendSatisfiability(
+		SatisfiabilityInfoMap &satInfoMap) {
 		if (!ClusterManager::getGroupMessagesEnabled()) {
 			assert(satInfoMap.empty());
 		}
 
-		if (satInfoMap.empty() && regionInfoMap.empty()) {
+		if (satInfoMap.empty()) {
 			return;
 		}
 
@@ -182,12 +161,6 @@ namespace TaskOffloading {
 		}
 		satInfoMap.clear();
 
-		for (auto &it: regionInfoMap) {
-			assert(it.first != nullptr);
-			MessageDataSend *msg = new MessageDataSend(it.second.size(), it.second);
-			ClusterManager::sendMessage(msg, it.first);
-		}
-		regionInfoMap.clear();
 	}
 
 
@@ -215,7 +188,6 @@ namespace TaskOffloading {
 			if (taskInfo._localTask == nullptr) {
 				// The remote task has not been created yet, so we just add the info to the
 				// temporary vector.
-				handleEagerSend(satInfo);
 				satInfo._eagerSendTag = 0;
 				taskInfo._satInfo.push_back(satInfo);
 				taskInfo._lock.unlock();

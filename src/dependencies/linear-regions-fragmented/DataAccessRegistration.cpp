@@ -1219,8 +1219,7 @@ namespace DataAccessRegistration {
 			if (linksRead || linksWrite) {
 				step->linkRegion(
 					access, linksRead, linksWrite,
-					hpDependencyData._satisfiabilityMap,
-					hpDependencyData._dataSendRegionInfoMap);
+					hpDependencyData._satisfiabilityMap);
 			}
 
 			if (updatedStatus._triggersDataLinkRead && updatedStatus._triggersDataLinkWrite) {
@@ -2510,8 +2509,8 @@ namespace DataAccessRegistration {
 		assert(hpDependencyData._satisfiedOriginators.empty());
 
 #ifdef USE_CLUSTER
-		TaskOffloading::sendSatisfiabilityAndDataSends(
-			hpDependencyData._satisfiabilityMap, hpDependencyData._dataSendRegionInfoMap
+		TaskOffloading::sendSatisfiability(
+			hpDependencyData._satisfiabilityMap
 		);
 #endif // USE_CLUSTER
 
@@ -3939,7 +3938,7 @@ namespace DataAccessRegistration {
 							&& accessOrFragment->hasNext()
 							&& accessOrFragment->getNext()._objectType == taskwait_type)) {
 
-							if (ClusterManager::getEagerSend() || accessOrFragment->getType() == AUTO_ACCESS_TYPE) {
+							if (accessOrFragment->getType() == AUTO_ACCESS_TYPE) {
 								ClusterNode *node = accessOrFragment->getOriginator()->getClusterContext()->getRemoteNode();
 								accessOrFragment->setDisableEagerSend();
 								hpDependencyData._accessInfoMap[node].emplace_back(
@@ -5894,7 +5893,7 @@ namespace DataAccessRegistration {
 			// that were never accessed by the task or a subtask
 			if (task->hasFinished()
 				&& task->isRemoteTask()
-				&& (ClusterManager::getEagerSend() || (task->hasAllMemory() && ClusterManager::autoOptimizeNonAccessed()))) {
+				&& (task->hasAllMemory() && ClusterManager::autoOptimizeNonAccessed())) {
 				accessStructures._accesses.processAll(
 					/* processor: called for each task access */
 					[&](TaskDataAccesses::accesses_t::iterator position) -> bool {
@@ -5902,8 +5901,7 @@ namespace DataAccessRegistration {
 						assert(access != nullptr);
 						if (!access->getPropagateFromNamespace()
 							&& !access->isAutoHasBeenAccessed()
-							&& (ClusterManager::getEagerSend() ||
-								(access->getType() == AUTO_ACCESS_TYPE && !access->isStrongLocalAccess()))
+							&& (access->getType() == AUTO_ACCESS_TYPE && !access->isStrongLocalAccess())
 							&& !access->getDisableEagerSend()) {
 								ClusterNode *node = task->getClusterContext()->getRemoteNode();
 								if (!access->hasSubaccesses()) {
@@ -6318,7 +6316,7 @@ namespace DataAccessRegistration {
 						bool linksWrite = !dataAccess->writeSatisfied();
 						if (step) {
 							if (linksRead || linksWrite) {
-								step->linkRegion(dataAccess, linksRead, linksWrite, hpDependencyData._satisfiabilityMap, hpDependencyData._dataSendRegionInfoMap);
+								step->linkRegion(dataAccess, linksRead, linksWrite, hpDependencyData._satisfiabilityMap);
 							}
 						}
 					} else {

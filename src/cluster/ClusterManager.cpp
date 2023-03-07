@@ -119,9 +119,6 @@ ClusterManager::ClusterManager(std::string const &commType, int argc, char **arg
 	ConfigVariable<bool> eagerWeakFetch("cluster.eager_weak_fetch");
 	_eagerWeakFetch = eagerWeakFetch.getValue();
 
-	ConfigVariable<bool> eagerSend("cluster.eager_send");
-	_eagerSend = eagerSend.getValue();
-
 	ConfigVariable<bool> mergeReleaseAndFinish("cluster.merge_release_and_finish");
 	_mergeReleaseAndFinish = mergeReleaseAndFinish.getValue();
 
@@ -366,7 +363,7 @@ int ClusterManager::nanos6GetInfo(nanos6_cluster_info_t *info)
 	info->disable_remote_connect = ClusterManager::getDisableRemoteConnect();
 	info->disable_autowait = ClusterManager::getDisableAutowait();
 	info->eager_weak_fetch = ClusterManager::getEagerWeakFetch();
-	info->eager_send = ClusterManager::getEagerSend();
+	info->eager_send = false;
 	info->merge_release_and_finish = ClusterManager::getMergeReleaseAndFinish();
 	info->reserved_leader_thread = CPUManager::hasReservedCPUforLeaderThread();
 	info->group_messages_enabled = ClusterManager::getGroupMessagesEnabled();

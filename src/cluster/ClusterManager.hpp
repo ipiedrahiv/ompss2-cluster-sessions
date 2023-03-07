@@ -82,8 +82,6 @@ private:
 
 	bool _eagerWeakFetch;
 
-	bool _eagerSend;
-
 	bool _mergeReleaseAndFinish;
 
 	bool _autoOptimizeNonAccessed;
@@ -509,12 +507,6 @@ public:
 	{
 		assert(_singleton != nullptr);
 		return _singleton->_eagerWeakFetch;
-	}
-
-	static bool getEagerSend()
-	{
-		assert(_singleton != nullptr);
-		return _singleton->_eagerSend;
 	}
 
 	static bool getMergeReleaseAndFinish()

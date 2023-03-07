@@ -26,33 +26,11 @@
 
 namespace ExecutionWorkflow {
 
-	static inline TaskOffloading::DataSendRegionInfo handleEagerSend(
-		DataAccessRegion region,
-		const MemoryPlace *sourceLocation,
-		const MemoryPlace *targetLocation
-	) {
-		if (ClusterManager::getEagerSend()               // cluster.eager_send = true
-			&& !sourceLocation->isDirectoryMemoryPlace() // and not in the directory (would mean data as yet invalid)
-			&& sourceLocation != targetLocation) {       // and not already at the target
-
-			int eagerSendTag = MessageId::nextMessageId(ClusterManager::getMPIFragments(region));
-
-			if (sourceLocation == ClusterManager::getCurrentMemoryNode()) {
-				DataTransfer *dt = ClusterManager::sendDataRaw(region, targetLocation, eagerSendTag);
-				ClusterPollingServices::PendingQueue<DataTransfer>::addPending(dt);
-			}
-			return TaskOffloading::DataSendRegionInfo({region, targetLocation, eagerSendTag});
-		} else {
-			return TaskOffloading::DataSendRegionInfo({region, nullptr, 0});
-		}
-	}
-
 	void ClusterDataLinkStep::linkRegion(
 		DataAccess const *access,
 		bool read,
 		bool write,
-		TaskOffloading::SatisfiabilityInfoMap &satisfiabilityMap,
-		TaskOffloading::DataSendRegionInfoMap &dataSendRegionInfoMap
+		TaskOffloading::SatisfiabilityInfoMap &satisfiabilityMap
 	) {
 		assert(access != nullptr);
 		assert(_task->getClusterContext() != nullptr);
@@ -95,23 +73,6 @@ namespace ExecutionWorkflow {
 			// in the namespace; so send the value nullptr.
 			ClusterNode *destNode = _task->getClusterContext()->getRemoteNode();
 
-			int eagerSendTag = 0;
-			if (_allowEagerSend
-				&& read
-				&& !access->getDisableEagerSend()
-				&& _namespacePredecessorNode != _targetMemoryPlace->getIndex()) { // and not propagated in remote namespace
-
-				TaskOffloading::DataSendRegionInfo dataSendRegionInfo
-					= handleEagerSend(region, location, _targetMemoryPlace);
-
-				eagerSendTag = dataSendRegionInfo._id;
-				if (eagerSendTag && location != ClusterManager::getCurrentMemoryNode()) {
-					// Queue the DataSendRegionInfo for a DataSend message
-					ClusterNode *sourceNode = ClusterManager::getClusterNode(locationIndex);
-					dataSendRegionInfoMap[sourceNode].emplace_back(dataSendRegionInfo);
-				}
-			}
-
 			// Create the satinfo
 			TaskOffloading::SatisfiabilityInfo satInfo(
 				region, locationIndex,
@@ -119,7 +80,7 @@ namespace ExecutionWorkflow {
 				access->isWeak(), access->getType(),
 				access->getReductionTypeAndOperatorIndex(),
 				access->getReductionIndex(),
-				writeID, _task->getOffloadedTaskId(), eagerSendTag
+				writeID, _task->getOffloadedTaskId(), 0 /* eagerSendTag */
 			);
 
 			if (ClusterManager::getGroupMessagesEnabled()) {
@@ -202,29 +163,6 @@ namespace ExecutionWorkflow {
 			ClusterExecutionStep *execStep = dynamic_cast<ClusterExecutionStep *>(_successors[0]);
 			assert(execStep != nullptr); // This asserts that the next step is the execution step
 
-			// assert(_read || _write);
-
-			// This assert is to prevent future errors when working with maleability.
-			// For now the index and the comIndex are the same. A more complete implementation
-			// Will have a pointer in ClusterMemoryNode to the ClusterNode and will get the
-			// Commindex from there with getCommIndex.
-			// assert(_sourceMemoryPlace->getIndex() == _sourceMemoryPlace->getCommIndex());
-			int eagerSendTag = 0;
-			if (_allowEagerSend && _read && _namespacePredecessorNode != _targetMemoryPlace->getIndex()) {
-				TaskOffloading::DataSendRegionInfo dataSendRegionInfo = handleEagerSend(_region, _sourceMemoryPlace, _targetMemoryPlace);
-				eagerSendTag = dataSendRegionInfo._id;
-				if (eagerSendTag && _sourceMemoryPlace != ClusterManager::getCurrentMemoryNode()) {
-					// Send a MessageDataSend to the source node: we send it immediately as we do not
-					// expect many accesses to be ready at the time that the task is offloaded in optimized
-					// code.
-					ClusterNode *sourceNode = ClusterManager::getClusterNode(location);
-					std::vector<TaskOffloading::DataSendRegionInfo> sends;
-					sends.push_back(dataSendRegionInfo);
-					MessageDataSend *msg = new MessageDataSend(1, sends);
-					ClusterManager::sendMessage(msg, sourceNode);
-				}
-			}
-
 			execStep->addDataLink(
 				location, _region,
 				_writeID,
@@ -233,7 +171,7 @@ namespace ExecutionWorkflow {
 				_reductionTypeAndOperatorIndex,
 				_reductionIndex,
 				_namespacePredecessor,
-				eagerSendTag
+				/* eagerSendTag */ 0
 			);
 
 			const size_t linkedBytes = _region.getSize();
