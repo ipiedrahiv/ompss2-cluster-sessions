@@ -76,8 +76,7 @@ namespace ExecutionWorkflow {
 		ClusterDataLinkStep(
 			MemoryPlace const *sourceMemoryPlace,
 			MemoryPlace const *targetMemoryPlace,
-			DataAccess *access,
-			__attribute__((unused)) CPUDependencyData &hpDependencyData
+			DataAccess *access
 		) : DataLinkStep(access),
 			_sourceMemoryPlace(sourceMemoryPlace),
 			_targetMemoryPlace(targetMemoryPlace),
@@ -479,8 +478,7 @@ namespace ExecutionWorkflow {
 		MemoryPlace const *source,
 		MemoryPlace const *target,
 		DataAccessRegion const &inregion,
-		DataAccess *access,
-		__attribute__((unused)) CPUDependencyData &hpDependencyData
+		DataAccess *access
 	) {
 		assert(source != nullptr);
 		assert(target == ClusterManager::getCurrentMemoryNode());
@@ -617,8 +615,7 @@ namespace ExecutionWorkflow {
 		MemoryPlace const *source,
 		MemoryPlace const *target,
 		DataAccessRegion const &region,
-		DataAccess *access,
-		CPUDependencyData &hpDependencyData
+		DataAccess *access
 	) {
 		assert(target != nullptr);
 		assert(access != nullptr);
@@ -643,11 +640,11 @@ namespace ExecutionWorkflow {
 		}
 
 		if (target == current) {
-			return clusterFetchData(source, target, region, access, hpDependencyData);
+			return clusterFetchData(source, target, region, access);
 		}
 
 		assert(access->getObjectType() == access_type);
-		return new ClusterDataLinkStep(source, target, access, hpDependencyData);
+		return new ClusterDataLinkStep(source, target, access);
 	}
 }
 

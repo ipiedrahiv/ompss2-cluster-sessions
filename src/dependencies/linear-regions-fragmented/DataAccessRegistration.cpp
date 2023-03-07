@@ -2244,8 +2244,7 @@ namespace DataAccessRegistration {
 				ClusterManager::getCurrentMemoryNode(),
 				access->getAccessRegion(),
 				access,
-				/* isTaskwait */ false,
-				hpDependencyData);
+				/* isTaskwait */ false);
 			if (!newDataCopyStep) {
 				// The initial value is already on the current node, so no data copy step is needed
 				// We still need to ensure that the counter step executes after all the data copy
