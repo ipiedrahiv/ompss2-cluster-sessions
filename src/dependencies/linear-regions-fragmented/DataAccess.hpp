@@ -43,7 +43,7 @@ namespace ExecutionWorkflow {
 };
 
 #define VALID_NAMESPACE_UNKNOWN -1
-#define VALID_NAMESPACE_NONE -2
+#define VALID_NAMESPACE_KNOWN 0
 
 //! The accesses that one or more tasks perform sequentially to a memory location that can occur concurrently (unless commutative).
 struct DataAccess : protected DataAccessBase {
@@ -654,7 +654,7 @@ public:
 			setIsStrongLocalAccess();
 		}
 		setValidNamespaceSelf(other->getValidNamespaceSelf());
-		setValidNamespacePrevious(VALID_NAMESPACE_NONE,
+		setValidNamespacePrevious(VALID_NAMESPACE_KNOWN,
 			OffloadedTaskIdManager::InvalidOffloadedTaskId);
 	}
 

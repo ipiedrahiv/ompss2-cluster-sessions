@@ -73,7 +73,7 @@ namespace ExecutionWorkflow {
 
 		/* Starting workflow for a task on the host: not in a namespace */
 		if (targetType == nanos6_host_device) {
-			access->setValidNamespaceSelf( ClusterManager::getCurrentMemoryNode()->getIndex());
+			access->setValidNamespaceSelf(VALID_NAMESPACE_KNOWN);
 		}
 
 		if (sourceType == nanos6_host_device || sourceMemoryPlace == ClusterManager::getCurrentMemoryNode()) {

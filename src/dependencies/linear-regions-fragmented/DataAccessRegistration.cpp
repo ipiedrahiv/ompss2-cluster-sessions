@@ -920,8 +920,8 @@ namespace DataAccessRegistration {
 					|| access->getType() == COMMUTATIVE_ACCESS_TYPE) {
 					// Do not propagate in the namespace from a concurrent or commutative
 					// access, as the synchronization is done at the offloader's side.
-					updateOperation._validNamespace = VALID_NAMESPACE_NONE;
-					updateOperation._namespacePredecessor = access->getOriginator()->getOffloadedTaskId();
+					updateOperation._validNamespace = VALID_NAMESPACE_KNOWN;
+					updateOperation._namespacePredecessor = OffloadedTaskIdManager::InvalidOffloadedTaskId;
 					updateOperation._namespaceAccessType = NO_ACCESS_TYPE;
 					access->setPropagatedNamespaceInfo();
 				} else if (access->getObjectType() == access_type
@@ -935,7 +935,7 @@ namespace DataAccessRegistration {
 						updateOperation._validNamespace = access->getValidNamespacePrevious();
 						updateOperation._namespacePredecessor = access->getNamespacePredecessor();
 					} else {
-						updateOperation._validNamespace = VALID_NAMESPACE_NONE;
+						updateOperation._validNamespace = VALID_NAMESPACE_KNOWN;
 						updateOperation._namespacePredecessor = OffloadedTaskIdManager::InvalidOffloadedTaskId;
 					}
 					updateOperation._namespaceAccessType = READ_ACCESS_TYPE;
@@ -1441,10 +1441,10 @@ namespace DataAccessRegistration {
 				newLocalAccess->setCommutativeSatisfied();
 				newLocalAccess->setReceivedReductionInfo();
 				newLocalAccess->setValidNamespacePrevious(
-					VALID_NAMESPACE_NONE,
+					VALID_NAMESPACE_KNOWN,
 					OffloadedTaskIdManager::InvalidOffloadedTaskId
 				);
-				newLocalAccess->setValidNamespaceSelf(VALID_NAMESPACE_NONE);
+				newLocalAccess->setValidNamespaceSelf(VALID_NAMESPACE_KNOWN);
 				newLocalAccess->setRegistered();
 		#ifndef NDEBUG
 				newLocalAccess->setReachable();
@@ -1990,7 +1990,7 @@ namespace DataAccessRegistration {
 				// disable namespace propagation out of these accesses (in the calculation
 				// of updateOperation._validNamespace).
 				access->setValidNamespacePrevious(
-					VALID_NAMESPACE_NONE,
+					VALID_NAMESPACE_KNOWN,
 					OffloadedTaskIdManager::InvalidOffloadedTaskId
 				);
 			} else {
@@ -2006,7 +2006,7 @@ namespace DataAccessRegistration {
 						updateOperation._namespacePredecessor
 					);
 				} else {
-					access->setValidNamespacePrevious(VALID_NAMESPACE_NONE, access->getOriginator()->getOffloadedTaskId());
+					access->setValidNamespacePrevious(VALID_NAMESPACE_KNOWN, OffloadedTaskIdManager::InvalidOffloadedTaskId);
 				}
 			}
 		}
@@ -3429,7 +3429,7 @@ namespace DataAccessRegistration {
 							DataAccessStatusEffects initialStatusT(targetAccess);
 
 							targetAccess->setValidNamespacePrevious(
-								VALID_NAMESPACE_NONE,
+								VALID_NAMESPACE_KNOWN,
 								OffloadedTaskIdManager::InvalidOffloadedTaskId
 							);
 
@@ -3574,7 +3574,7 @@ namespace DataAccessRegistration {
 
 						targetAccess->setReceivedReductionInfo();
 						targetAccess->setValidNamespacePrevious(
-							VALID_NAMESPACE_NONE,
+							VALID_NAMESPACE_KNOWN,
 							OffloadedTaskIdManager::InvalidOffloadedTaskId
 						);
 
@@ -5118,8 +5118,6 @@ namespace DataAccessRegistration {
 					}
 				}
 
-				// access->setValidNamespacePrevious(VALID_NAMESPACE_NONE, nullptr);
-				// access->setValidNamespaceSelf(VALID_NAMESPACE_NONE);
 				DataAccessStatusEffects updatedStatus(access);
 				updatedStatus._allowNamespacePropagation = false;
 
@@ -5181,10 +5179,10 @@ namespace DataAccessRegistration {
 			newLocalAccess->setCommutativeSatisfied();
 			newLocalAccess->setReceivedReductionInfo();
 			newLocalAccess->setValidNamespacePrevious(
-				VALID_NAMESPACE_NONE,
+				VALID_NAMESPACE_KNOWN,
 				OffloadedTaskIdManager::InvalidOffloadedTaskId
 			);
-			newLocalAccess->setValidNamespaceSelf(VALID_NAMESPACE_NONE);
+			newLocalAccess->setValidNamespaceSelf(VALID_NAMESPACE_KNOWN);
 			newLocalAccess->setRegistered();
 	#ifndef NDEBUG
 			newLocalAccess->setReachable();
@@ -6190,7 +6188,7 @@ namespace DataAccessRegistration {
 
 	// NOTE: you must call setNamespaceSelf with the lock on the data structures
 	// Then call setNamespaceSelfDone without the lock
-	void setNamespaceSelf(DataAccess *access, int targetNamespace, CPUDependencyData &hpDependencyData)
+	void setNamespaceSelf(DataAccess *access, __attribute__((unused)) int targetNamespace, CPUDependencyData &hpDependencyData)
 	{
 		// This is called with the lock on the task accesses already taken
 		Task *task = access->getOriginator();
@@ -6198,7 +6196,7 @@ namespace DataAccessRegistration {
 		assert(!accessStructures.hasBeenDeleted());
 
 		DataAccessStatusEffects initialStatus(access);
-		access->setValidNamespaceSelf(targetNamespace);
+		access->setValidNamespaceSelf(VALID_NAMESPACE_KNOWN);
 		DataAccessStatusEffects updatedStatus(access);
 
 		handleDataAccessStatusChanges(
