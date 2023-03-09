@@ -149,10 +149,10 @@ void NodeNamespace::callbackDecrementPrivate()
 bool NodeNamespace::tryWakeUp()
 {
 	// Unblock the executor if it was blocked
-	if (_blockedTask.load() != nullptr) {
-		assert(_blockedTask == _namespaceTask);
-
-		_blockedTask.store(nullptr);
+	Task *expected = _namespaceTask;
+	bool successful = _blockedTask.compare_exchange_strong(expected, nullptr);
+	if (successful) {
+		// _blockedTask became nullptr
 		BlockingAPI::unblockTask(_namespaceTask, false);
 		Instrument::stateNodeNamespace(3);
 
