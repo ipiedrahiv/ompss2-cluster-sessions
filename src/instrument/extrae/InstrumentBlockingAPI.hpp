@@ -140,12 +140,14 @@ namespace Instrument {
 		__attribute__((unused)) task_id_t taskId,
 		__attribute__((unused)) InstrumentationContext const &context
 	) {
+		enterBlockCurrentTask(taskId, /* taskRuntimeTransition */ true, context);
 	}
 
 	inline void exitWaitFor(
 		__attribute__((unused)) task_id_t taskId,
 		__attribute__((unused)) InstrumentationContext const &context
 	) {
+		exitBlockCurrentTask(taskId, /* taskRuntimeTransition */ true, context);
 	}
 }
 
