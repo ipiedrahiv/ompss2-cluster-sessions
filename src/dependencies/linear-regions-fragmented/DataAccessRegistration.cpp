@@ -1637,7 +1637,6 @@ namespace DataAccessRegistration {
 			accessStructures._subaccessBottomMap.iterator_to(*bottomMapEntry);
 		position = accessStructures._subaccessBottomMap.fragmentByIntersection(
 			position, region,
-			/* removeIntersection */ false,
 			[&](BottomMapEntry const &toBeDuplicated) -> BottomMapEntry * {
 				return ObjectAllocator<BottomMapEntry>::newObject(DataAccessRegion(), toBeDuplicated._link,
 					toBeDuplicated._accessType, toBeDuplicated._reductionTypeAndOperatorIndex);
@@ -1700,7 +1699,6 @@ namespace DataAccessRegistration {
 			accessStructures._accesses.iterator_to(*dataAccess);
 		position = accessStructures._accesses.fragmentByIntersection(
 			position, region,
-			/* removeIntersection */ false,
 			/* duplicator */
 			[&](DataAccess const &toBeDuplicated) -> DataAccess * {
 				assert(toBeDuplicated.isRegistered());
@@ -1744,7 +1742,6 @@ namespace DataAccessRegistration {
 			accessStructures._accesses.iterator_to(*dataAccess);
 		position = accessStructures._accesses.fragmentByIntersection(
 			position, region,
-			/* removeIntersection */ false,
 			/* duplicator */
 			[&](DataAccess const &toBeDuplicated) -> DataAccess * {
 				assert(!toBeDuplicated.isRegistered());
@@ -1782,7 +1779,6 @@ namespace DataAccessRegistration {
 			accessStructures._accessFragments.iterator_to(*dataAccess);
 		position = accessStructures._accessFragments.fragmentByIntersection(
 			position, region,
-			/* removeIntersection */ false,
 			/* duplicator */
 			[&](DataAccess const &toBeDuplicated) -> DataAccess * {
 				assert(toBeDuplicated.isRegistered());
@@ -1820,7 +1816,6 @@ namespace DataAccessRegistration {
 			accessStructures._taskwaitFragments.iterator_to(*dataAccess);
 		position = accessStructures._taskwaitFragments.fragmentByIntersection(
 			position, region,
-			/* removeIntersection */ false,
 			/* duplicator */
 			[&](DataAccess const &toBeDuplicated) -> DataAccess * {
 				assert(toBeDuplicated.isRegistered());

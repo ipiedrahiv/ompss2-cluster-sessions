@@ -469,13 +469,11 @@ typename IntrusiveLinearRegionMap<ContentType, Hook>::iterator
 IntrusiveLinearRegionMap<ContentType, Hook>::fragmentByIntersection(
 	typename IntrusiveLinearRegionMap<ContentType, Hook>::iterator position,
 	DataAccessRegion const &fragmenterRegion,
-	bool removeIntersection,
 	std::function<ContentType *(ContentType &)> duplicator,
 	std::function<void(ContentType *, ContentType *)> postprocessor
 ) {
 	iterator intersectionPosition = BaseType::end();
 	DataAccessRegion originalRegion = position->getAccessRegion();
-	bool alreadyShrinked = false;
 	ContentType &contents = *position;
 
 	VERIFY_MAP();
@@ -484,49 +482,22 @@ IntrusiveLinearRegionMap<ContentType, Hook>::fragmentByIntersection(
 		/* originalRegion only */
 		[&](DataAccessRegion const &region) {
 			VERIFY_MAP();
-			if (!alreadyShrinked) {
-				position->setAccessRegion(region);
-				alreadyShrinked = true;
-				postprocessor(&(*position), &(*position));
-				VERIFY_MAP();
-			} else {
-				ContentType *newContents = duplicator(contents); // An error here indicates that the duplicator is missing the "ContentType *" return type
-				newContents->setAccessRegion(region);
-				BaseType::insert(*newContents);
-				postprocessor(newContents, &(*position));
-				VERIFY_MAP();
-			}
+			ContentType *newContents = duplicator(contents); // An error here indicates that the duplicator is missing the "ContentType *" return type
+			newContents->setAccessRegion(region);
+			BaseType::insert(*newContents);
+			postprocessor(newContents, &(*position));
+			VERIFY_MAP();
 		},
 		/* intersection */
 		[&](DataAccessRegion const &region) {
 			VERIFY_MAP();
 			assert(region == originalRegion.intersect(fragmenterRegion));
-			if (!removeIntersection) {
-				if (!alreadyShrinked) {
-					position->setAccessRegion(region);
-					alreadyShrinked = true;
-					intersectionPosition = position;
-					assert(intersectionPosition->getAccessRegion() == region);
-					postprocessor(&(*position), &(*position));
-					assert(intersectionPosition->getAccessRegion() == region);
-					VERIFY_MAP();
-				} else {
-					ContentType *newContents = duplicator(contents); // An error here indicates that the duplicator is missing the "ContentType *" return type
-					newContents->setAccessRegion(region);
-					intersectionPosition = BaseType::insert(*newContents).first;
-					assert(intersectionPosition->getAccessRegion() == region);
-					postprocessor(newContents, &(*position));
-					assert(intersectionPosition->getAccessRegion() == region);
-					VERIFY_MAP();
-				}
-			} else {
-				if (!alreadyShrinked) {
-					VERIFY_MAP();
-					BaseType::erase(position);
-					VERIFY_MAP();
-					alreadyShrinked = true;
-				}
-			}
+			position->setAccessRegion(region);
+			intersectionPosition = position;
+			assert(intersectionPosition->getAccessRegion() == region);
+			postprocessor(&(*position), &(*position));
+			assert(intersectionPosition->getAccessRegion() == region);
+			VERIFY_MAP();
 		},
 		/* fragmeterRegion only */
 		[&](__attribute__((unused)) DataAccessRegion const &region) {
@@ -549,7 +520,7 @@ void IntrusiveLinearRegionMap<ContentType, Hook>::fragmentIntersecting(
 		region,
 		[&](iterator position) -> bool {
 			VERIFY_MAP();
-			fragmentByIntersection(position, region, false, duplicator, postprocessor);
+			fragmentByIntersection(position, region, duplicator, postprocessor);
 			VERIFY_MAP();
 			return true;
 		}

@@ -235,7 +235,6 @@ public:
 	iterator fragmentByIntersection(
 		iterator position,
 		DataAccessRegion const &region,
-		bool removeIntersection,
 		std::function<ContentType *(ContentType &)> duplicator,
 		std::function<void(ContentType *, ContentType *)> postprocessor
 	);

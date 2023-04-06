@@ -85,7 +85,7 @@ struct WriteIDEntry {
 				if (position->_writeID != id) {
 					if (!position->_region.fullyContainedIn(region)) {
 						position = _regions.fragmentByIntersection(
-							position, region, /* removeIntersection */ false
+							position, region
 						);
 					}
 					position->_writeID = id;
@@ -240,7 +240,7 @@ public:
 					if (position->_writeID == oldId) {
 						if (!position->_region.fullyContainedIn(region)) {
 							position = oldEntry._regions.fragmentByIntersection(
-								position, region, /* removeIntersection */ false
+								position, region
 							);
 						}
 						position->_writeID = newId;
