@@ -1596,8 +1596,6 @@ namespace DataAccessRegistration {
 		// Copy symbols
 		newFragment->addToSymbols(toBeDuplicated.getSymbols()); // TODO: Consider removing the pointer from declaration and make it a reference
 
-		newFragment->clearRegistered();
-
 		return newFragment;
 	}
 
@@ -1672,7 +1670,7 @@ namespace DataAccessRegistration {
 			assert (!initialStatus._isRemovable);
 #endif
 			// Note: this duplicates some of the code inside handleDataAccessStatusChanges.
-			fragment->setRegistered();
+			assert(fragment->isRegistered()); // was not cleared by duplicateDataAccess
 			assert (accessStructures._removalBlockers > 0);
 			accessStructures._removalBlockers++;
 
@@ -1690,6 +1688,7 @@ namespace DataAccessRegistration {
 			}
 		} else {
 			// Slow path: general case for fragmenting an access
+			fragment->clearRegistered();
 			CPUDependencyData hpDependencyData;
 
 			DataAccessStatusEffects initialStatus(fragment);
