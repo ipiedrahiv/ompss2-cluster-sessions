@@ -750,6 +750,7 @@ namespace DataAccessRegistration {
 		if (initialStatus._isRegistered != updatedStatus._isRegistered) {
 			assert(!initialStatus._isRegistered);
 
+			// Note: this code to register a fragment is duplicated inside setUpNewFragment
 			// Count the access
 			if (!initialStatus._isRemovable) {
 				if (accessStructures._removalBlockers == 0) {
@@ -1654,22 +1655,54 @@ namespace DataAccessRegistration {
 		DataAccess *fragment, const DataAccess *originalDataAccess,
 		TaskDataAccesses &accessStructures)
 	{
-		assert(fragment != originalDataAccess);
-		CPUDependencyData hpDependencyData;
+		assert (fragment != originalDataAccess);
 
-		DataAccessStatusEffects initialStatus(fragment);
-		fragment->setUpNewFragment(originalDataAccess->getInstrumentationId());
-		fragment->setRegistered();
-		DataAccessStatusEffects updatedStatus(fragment);
-		updatedStatus._allowNamespacePropagation = false;
+		if (!fragment->complete()
+			&& fragment->getType() != REDUCTION_ACCESS_TYPE
+			&& fragment->getType() != COMMUTATIVE_ACCESS_TYPE) {
+			// Fast path: fragmenting an access that is definitely not removable
+			// and doesn't need any special accounting.
+#ifndef NDEBUG
+			// Not being complete should imply that the access is not
+			// removable, but check this in the debug version.
+			DataAccessStatusEffects initialStatus(fragment);
+			assert (!initialStatus._isRemovable);
+#endif
+			// Note: this duplicates some of the code inside handleDataAccessStatusChanges.
+			fragment->setRegistered();
+			assert (accessStructures._removalBlockers > 0);
+			accessStructures._removalBlockers++;
 
-		handleDataAccessStatusChanges(
-			initialStatus, updatedStatus,
-			fragment, accessStructures, fragment->getOriginator(),
-			hpDependencyData);
+			/*
+			 * Count the registered taskwait fragments, so know when they
+			 * have all been handled.
+			 */
+			if (fragment->getObjectType() == taskwait_type) {
+				accessStructures._liveTaskwaitFragmentCount++;
+			}
 
-		/* Do not expect any delayed operations */
-		assert (hpDependencyData.empty());
+			bool enforcesDependency = !fragment->isWeak() && !fragment->satisfied();
+			if (enforcesDependency) {
+				fragment->getOriginator()->increasePredecessors();
+			}
+		} else {
+			// Slow path: general case for fragmenting an access
+			CPUDependencyData hpDependencyData;
+
+			DataAccessStatusEffects initialStatus(fragment);
+			fragment->setUpNewFragment(originalDataAccess->getInstrumentationId());
+			fragment->setRegistered();
+			DataAccessStatusEffects updatedStatus(fragment);
+			updatedStatus._allowNamespacePropagation = false;
+
+			handleDataAccessStatusChanges(
+				initialStatus, updatedStatus,
+				fragment, accessStructures, fragment->getOriginator(),
+				hpDependencyData);
+
+			/* Do not expect any delayed operations */
+			assert (hpDependencyData.empty());
+		}
 	}
 
 
