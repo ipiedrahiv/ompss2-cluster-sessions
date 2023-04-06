@@ -713,6 +713,9 @@ namespace DataAccessRegistration {
 	static inline DataAccess *fragmentAccess(
 		DataAccess *dataAccess, DataAccessRegion const &region,
 		TaskDataAccesses &accessStructures);
+	static inline DataAccess *doFragmentAccessObject(
+		DataAccess *dataAccess, DataAccessRegion const &region,
+		TaskDataAccesses &accessStructures);
 	static inline DataAccess *fragmentAccessObject(
 		DataAccess *dataAccess, DataAccessRegion const &region,
 		TaskDataAccesses &accessStructures);
@@ -1713,17 +1716,12 @@ namespace DataAccessRegistration {
 	 *
 	 */
 
-	static inline DataAccess *fragmentAccessObject(
+	static inline DataAccess *doFragmentAccessObject(
 		DataAccess *dataAccess, DataAccessRegion const &region,
 		TaskDataAccesses &accessStructures)
 	{
 		assert(!dataAccess->hasBeenDiscounted());
 		assert(dataAccess->getObjectType() == access_type);
-
-		if (dataAccess->getAccessRegion().fullyContainedIn(region)) {
-			// Nothing to fragment
-			return dataAccess;
-		}
 
 		TaskDataAccesses::accesses_t::iterator position =
 			accessStructures._accesses.iterator_to(*dataAccess);
@@ -1745,6 +1743,17 @@ namespace DataAccessRegistration {
 		assert(dataAccess->getAccessRegion().fullyContainedIn(region));
 
 		return dataAccess;
+	}
+
+	static inline DataAccess *fragmentAccessObject(
+		DataAccess *dataAccess, DataAccessRegion const &region,
+		TaskDataAccesses &accessStructures)
+	{
+		if (dataAccess->getAccessRegion().fullyContainedIn(region)) {
+			// Nothing to fragment
+			return dataAccess;
+		}
+		return doFragmentAccessObject(dataAccess, region, accessStructures);
 	}
 
 	/*
@@ -1903,7 +1912,7 @@ namespace DataAccessRegistration {
 		}
 
 		if (dataAccess->getObjectType() == access_type) {
-			return fragmentAccessObject(dataAccess, region, accessStructures);
+			return doFragmentAccessObject(dataAccess, region, accessStructures);
 		} else if (dataAccess->getObjectType() == fragment_type) {
 			return fragmentFragmentObject(dataAccess, region, accessStructures);
 		} else {
