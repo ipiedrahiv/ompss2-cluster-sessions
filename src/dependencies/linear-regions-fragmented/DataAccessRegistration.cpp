@@ -704,7 +704,7 @@ namespace DataAccessRegistration {
 	);
 	static inline BottomMapEntry *fragmentBottomMapEntry(
 		BottomMapEntry *bottomMapEntry, DataAccessRegion region,
-		TaskDataAccesses &accessStructures, bool removeIntersection = false);
+		TaskDataAccesses &accessStructures);
 	static void handleRemovableTasks(
 		/* inout */ CPUDependencyData::removable_task_list_t &removableTasks);
 	static void handleCompletedTaskwaits(
@@ -1623,7 +1623,7 @@ namespace DataAccessRegistration {
 
 	static inline BottomMapEntry *fragmentBottomMapEntry(
 		BottomMapEntry *bottomMapEntry, DataAccessRegion region,
-		TaskDataAccesses &accessStructures, bool removeIntersection)
+		TaskDataAccesses &accessStructures)
 	{
 		if (bottomMapEntry->getAccessRegion().fullyContainedIn(region)) {
 			// Nothing to fragment
@@ -1637,7 +1637,7 @@ namespace DataAccessRegistration {
 			accessStructures._subaccessBottomMap.iterator_to(*bottomMapEntry);
 		position = accessStructures._subaccessBottomMap.fragmentByIntersection(
 			position, region,
-			removeIntersection,
+			/* removeIntersection */ false,
 			[&](BottomMapEntry const &toBeDuplicated) -> BottomMapEntry * {
 				return ObjectAllocator<BottomMapEntry>::newObject(DataAccessRegion(), toBeDuplicated._link,
 					toBeDuplicated._accessType, toBeDuplicated._reductionTypeAndOperatorIndex);
@@ -1645,15 +1645,11 @@ namespace DataAccessRegistration {
 			[&](__attribute__((unused)) BottomMapEntry *fragment, __attribute__((unused)) BottomMapEntry *originalBottomMapEntry) {
 			});
 
-		if (!removeIntersection) {
-			bottomMapEntry = &(*position);
-			assert(bottomMapEntry != nullptr);
-			assert(bottomMapEntry->getAccessRegion().fullyContainedIn(region));
+		bottomMapEntry = &(*position);
+		assert(bottomMapEntry != nullptr);
+		assert(bottomMapEntry->getAccessRegion().fullyContainedIn(region));
 
-			return bottomMapEntry;
-		} else {
-			return nullptr;
-		}
+		return bottomMapEntry;
 	}
 
 
