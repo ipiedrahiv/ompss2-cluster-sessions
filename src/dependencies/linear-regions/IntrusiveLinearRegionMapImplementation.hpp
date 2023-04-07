@@ -511,6 +511,68 @@ IntrusiveLinearRegionMap<ContentType, Hook>::fragmentByIntersection(
 
 
 template <typename ContentType, class Hook>
+typename IntrusiveLinearRegionMap<ContentType, Hook>::iterator
+IntrusiveLinearRegionMap<ContentType, Hook>::fragmentByIntersection(
+	typename IntrusiveLinearRegionMap<ContentType, Hook>::iterator position,
+	DataAccessRegion const &fragmenterRegion,
+	std::function<ContentType *(ContentType &)> duplicator
+) {
+	DataAccessRegion originalRegion = position->getAccessRegion();
+	ContentType &contents = *position;
+
+	VERIFY_MAP();
+	const char *originalStart = (const char *) originalRegion.getStartAddress();
+	const char *originalEnd = (const char *) originalRegion.getEndAddress();
+	const char *secondStart = (const char *) fragmenterRegion.getStartAddress();
+	const char *secondEnd = (const char *) fragmenterRegion.getEndAddress();
+
+	const char *intersectionStart = std::max(originalStart, secondStart);
+	const char *intersectionEnd = std::min(originalEnd, secondEnd);
+
+	// There must be an intersection
+	assert(intersectionStart < intersectionEnd);
+
+	// Intersection
+	DataAccessRegion intersection(intersectionStart, intersectionEnd);
+	VERIFY_MAP();
+	assert(intersection == originalRegion.intersect(fragmenterRegion));
+	position->setAccessRegion(intersection);
+	iterator intersectionPosition = position;
+	assert(intersectionPosition->getAccessRegion() == intersection);
+	VERIFY_MAP();
+
+	// Left of intersection
+	if (originalStart < intersectionStart) {
+		DataAccessRegion leftOfIntersection(originalStart, intersectionStart);
+		VERIFY_MAP();
+		ContentType *newContents = duplicator(contents); // An error here indicates that the duplicator is missing the "ContentType *" return type
+		newContents->setAccessRegion(leftOfIntersection);
+		iterator pos = BaseType::insert(intersectionPosition, *newContents);
+		pos++;
+		assert(pos == intersectionPosition);
+		VERIFY_MAP();
+	}
+
+	// Right of intersection
+	if (intersectionEnd < originalEnd) {
+		DataAccessRegion rightOfIntersection(intersectionEnd, originalEnd);
+		VERIFY_MAP();
+		ContentType *newContents = duplicator(contents); // An error here indicates that the duplicator is missing the "ContentType *" return type
+		newContents->setAccessRegion(rightOfIntersection);
+		iterator rightPosition = intersectionPosition;
+		rightPosition++;
+		iterator pos = BaseType::insert(rightPosition, *newContents);
+		pos++;
+		assert(pos == rightPosition);
+		VERIFY_MAP();
+	}
+
+	assert((intersectionPosition == BaseType::end()) || (intersectionPosition->getAccessRegion() == originalRegion.intersect(fragmenterRegion)));
+	return intersectionPosition;
+}
+
+
+template <typename ContentType, class Hook>
 void IntrusiveLinearRegionMap<ContentType, Hook>::fragmentIntersecting(
 	DataAccessRegion const &region,
 	std::function<ContentType *(ContentType &)> duplicator,

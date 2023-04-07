@@ -1640,8 +1640,6 @@ namespace DataAccessRegistration {
 			[&](BottomMapEntry const &toBeDuplicated) -> BottomMapEntry * {
 				return ObjectAllocator<BottomMapEntry>::newObject(DataAccessRegion(), toBeDuplicated._link,
 					toBeDuplicated._accessType, toBeDuplicated._reductionTypeAndOperatorIndex);
-			},
-			[&](__attribute__((unused)) BottomMapEntry *fragment, __attribute__((unused)) BottomMapEntry *originalBottomMapEntry) {
 			});
 
 		bottomMapEntry = &(*position);
@@ -1653,7 +1651,7 @@ namespace DataAccessRegistration {
 
 
 	static inline void setUpNewFragment(
-		DataAccess *fragment, DataAccess *originalDataAccess,
+		DataAccess *fragment, const DataAccess *originalDataAccess,
 		TaskDataAccesses &accessStructures)
 	{
 		if (fragment != originalDataAccess) {
@@ -1702,11 +1700,9 @@ namespace DataAccessRegistration {
 			/* duplicator */
 			[&](DataAccess const &toBeDuplicated) -> DataAccess * {
 				assert(toBeDuplicated.isRegistered());
-				return duplicateDataAccess(toBeDuplicated, accessStructures);
-			},
-			/* postprocessor */
-			[&](DataAccess *fragment, DataAccess *originalDataAccess) {
-				setUpNewFragment(fragment, originalDataAccess, accessStructures);
+				DataAccess *fragment =  duplicateDataAccess(toBeDuplicated, accessStructures);
+				setUpNewFragment(fragment, &toBeDuplicated, accessStructures);
+				return fragment;
 			});
 
 		/*
