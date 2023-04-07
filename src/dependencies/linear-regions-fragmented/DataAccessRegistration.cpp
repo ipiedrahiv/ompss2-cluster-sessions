@@ -1654,23 +1654,22 @@ namespace DataAccessRegistration {
 		DataAccess *fragment, const DataAccess *originalDataAccess,
 		TaskDataAccesses &accessStructures)
 	{
-		if (fragment != originalDataAccess) {
-			CPUDependencyData hpDependencyData;
+		assert(fragment != originalDataAccess);
+		CPUDependencyData hpDependencyData;
 
-			DataAccessStatusEffects initialStatus(fragment);
-			fragment->setUpNewFragment(originalDataAccess->getInstrumentationId());
-			fragment->setRegistered();
-			DataAccessStatusEffects updatedStatus(fragment);
-			updatedStatus._allowNamespacePropagation = false;
+		DataAccessStatusEffects initialStatus(fragment);
+		fragment->setUpNewFragment(originalDataAccess->getInstrumentationId());
+		fragment->setRegistered();
+		DataAccessStatusEffects updatedStatus(fragment);
+		updatedStatus._allowNamespacePropagation = false;
 
-			handleDataAccessStatusChanges(
-				initialStatus, updatedStatus,
-				fragment, accessStructures, fragment->getOriginator(),
-				hpDependencyData);
+		handleDataAccessStatusChanges(
+			initialStatus, updatedStatus,
+			fragment, accessStructures, fragment->getOriginator(),
+			hpDependencyData);
 
-			/* Do not expect any delayed operations */
-			assert (hpDependencyData.empty());
-		}
+		/* Do not expect any delayed operations */
+		assert (hpDependencyData.empty());
 	}
 
 
@@ -1741,11 +1740,9 @@ namespace DataAccessRegistration {
 			/* duplicator */
 			[&](DataAccess const &toBeDuplicated) -> DataAccess * {
 				assert(!toBeDuplicated.isRegistered());
-				return duplicateDataAccess(toBeDuplicated, accessStructures);
-			},
-			/* postprocessor */
-			[&](DataAccess *fragment, DataAccess *originalDataAccess) {
-				fragment->setUpNewFragment(originalDataAccess->getInstrumentationId());
+				DataAccess *fragment = duplicateDataAccess(toBeDuplicated, accessStructures);
+				setUpNewFragment(fragment, &toBeDuplicated, accessStructures);
+				return fragment;
 			});
 
 		/*
@@ -1778,11 +1775,9 @@ namespace DataAccessRegistration {
 			/* duplicator */
 			[&](DataAccess const &toBeDuplicated) -> DataAccess * {
 				assert(toBeDuplicated.isRegistered());
-				return duplicateDataAccess(toBeDuplicated, accessStructures);
-			},
-			/* postprocessor */
-			[&](DataAccess *fragment, DataAccess *originalDataAccess) {
-				setUpNewFragment(fragment, originalDataAccess, accessStructures);
+				DataAccess *fragment =  duplicateDataAccess(toBeDuplicated, accessStructures);
+				setUpNewFragment(fragment, &toBeDuplicated, accessStructures);
+				return fragment;
 			});
 
 		/*
@@ -1815,11 +1810,9 @@ namespace DataAccessRegistration {
 			/* duplicator */
 			[&](DataAccess const &toBeDuplicated) -> DataAccess * {
 				assert(toBeDuplicated.isRegistered());
-				return duplicateDataAccess(toBeDuplicated, accessStructures);
-			},
-			/* postprocessor */
-			[&](DataAccess *fragment, DataAccess *originalDataAccess) {
-				setUpNewFragment(fragment, originalDataAccess, accessStructures);
+				DataAccess *fragment =  duplicateDataAccess(toBeDuplicated, accessStructures);
+				setUpNewFragment(fragment, &toBeDuplicated, accessStructures);
+				return fragment;
 			});
 
 		/*
