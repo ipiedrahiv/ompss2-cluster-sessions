@@ -2249,9 +2249,15 @@ namespace DataAccessRegistration {
 				access,
 				/* isTaskwait */ false,
 				hpDependencyData);
+			if (!newDataCopyStep) {
+				// The initial value is already on the current node, so no data copy step is needed
+				// We still need to ensure that the counter step executes after all the data copy
+				// steps. The simplest way to do this is to create an empty workflow step for this
+				// purpose.
+				newDataCopyStep = new ExecutionWorkflow::Step;
+			}
 			ExecutionWorkflow::CounterStep *counterStep = access->getOriginator()->getReductionTransferCounterStep();
 			workflow->enforceOrder(newDataCopyStep, counterStep);
-
 			hpDependencyData._stepsToStart.push_back(newDataCopyStep);
 			counterStep->decrement(access->getAccessRegion().getSize());
 		}
