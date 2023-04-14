@@ -145,10 +145,23 @@ retry:
 	}
 
 	if (result == nullptr
-		|| !result->isTaskforSource()
-		|| (result->isTaskforSource() && result->getWorkflow() == nullptr)) {
+		|| !result->isTaskforSource()) {
+		// Nullptr (no task) or a task that is not a taskfor
 		return result;
 	}
+
+	assert(result->isTaskforSource());
+
+	if (result->getWorkflow() == nullptr) {
+		// A taskfor instance becomes ready for the first time. Execute it
+		// immediately to create the workflow, program any data copy or data
+		// link steps and block until they have completed.
+		return result;
+	}
+
+	// The taskfor becomes ready for a second time. Now we can execute it
+	// concurrently across the cores.
+	assert(result->getExecutionStep() != nullptr);
 
 	assert(result->isTaskfor());
 	assert(computePlace->getType() == nanos6_host_device);
