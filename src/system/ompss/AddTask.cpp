@@ -176,6 +176,25 @@ void AddTask::submitTask(Task *task, Task *parent, bool fromUserCode)
 	// argsBlock AFTER nanos6_create_task (constructor).
 	task->initConstraints();
 
+	int taskNodeId = task->getConstraints()->node; // node clause
+
+	if (taskNodeId >= 0) {
+		// As an exception, the node() clause is ignored when not in cluster mode.
+		// Handle this by setting it to zero.
+		if (!ClusterManager::inClusterMode()) {
+			taskNodeId = 0;
+			task->setNode(taskNodeId);
+		}
+
+		// Raise an error if the node() clause is out of range.
+		FatalErrorHandler::failIf(
+			taskNodeId >= ClusterManager::clusterSize(),
+			"node in node() clause is out of range (",
+			taskNodeId, " >= ", ClusterManager::clusterSize(),
+			") in task: ", task->getLabel()
+		);
+	}
+
 	// Retrieve the current thread, compute place, and the creator if it exists
 	Task *creator = nullptr;
 	ComputePlace *computePlace = nullptr;

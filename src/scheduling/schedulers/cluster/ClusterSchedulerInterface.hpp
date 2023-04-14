@@ -135,12 +135,7 @@ public:
 		}
 
 		if (nodeId >= 0) {                            // Id is a node number.
-			FatalErrorHandler::failIf(
-				nodeId >= ClusterManager::clusterSize(),
-				"node in node() clause is out of range (",
-				nodeId, " >= ", ClusterManager::clusterSize(),
-				") in task: ", task->getLabel()
-			);
+			assert(nodeId < ClusterManager::clusterSize()); // already checked in AddTask
 
 			return nodeId;
 		}
