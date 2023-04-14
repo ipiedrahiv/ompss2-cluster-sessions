@@ -2029,17 +2029,29 @@ namespace DataAccessRegistration {
 		//            v          satisfiability messages (which could arrive after the task
 		//          Non-in       has been deleted).
 		//
-		//   (c) Namespace non-in => in
+		//   (c) Namespace non-in => in  or   in => in
 		//
-		//          Access       For a namespace access to an in access (e.g. inout to in or
-		//            |          in to in), R and C	satisfiability are propagated from the
-		//            | R,C      previous in the remote namespace. This allows the "in"
-		//   W        v          in access to quickly become satisfied. But the offloader does
-		// ------>    in         not track which of potentially multiple remote nodes are able
-		//                       to propagate in the remote namespace, so it sends R and W
-		//                       satisfiability to all of them. We ignore the R satisfiability
-		//                       in the message but take the W satisfiability. This ensures that
-		//                       the task cannot have been deleted when the message arrives.
+		//          Access       For a namespace access (non-in or in) to an in access, R
+		//            |          satisfiability is propagated from the previous in the 
+		//            | R        remote namespace. This allows a previous inout on a node
+		//   W,C      v          to immediately pass read satisfiability to all the readers
+		// ------>    in         on the same node (even if there are also readers of the
+		//                       same value on other node(s). But the offloader does not
+		//                       track which node(s) can successfully propagate in the remote
+		//                       namespace. It will therefore send read and (pseudo)write
+		//                       satisfiability to all of the subsequent tasks, including the
+		//                       one marked as "in" in the diagram. We must ensure that this
+		//                       task cannot be deleted until after this message has been
+		//                       processed. To do this, although we pass R satisfiability in
+		//                       the namespace, we pass (pseudo)W and implied C satisfiability
+		//                       in the propagate satisfiability message. This message will
+		//                       also pass R satisfiability, which we ignore.
+		//
+		//    (d) Namespace in => non-in
+		//
+		//                       Does not happen. Write-after-read dependencies are handled
+		//                       by the offloader.
+
 		if (access->getPropagateFromNamespace()) {
 			// If propagated into this access in the remote namespace, then... 
 			if (updateOperation._propagateSatisfiability) {
@@ -2219,6 +2231,7 @@ namespace DataAccessRegistration {
 				assert(access->getType() == READ_ACCESS_TYPE);
 				assert(!access->writeSatisfied());
 				access->setWriteSatisfied();
+				access->setConcurrentSatisfied();
 			}
 
 			// Also, commutative satisfiability for commutative accesses
