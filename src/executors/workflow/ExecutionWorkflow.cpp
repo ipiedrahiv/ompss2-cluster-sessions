@@ -428,10 +428,30 @@ namespace ExecutionWorkflow {
 					// read satisfied, as the normal DataCopyStep created above will perform
 					// the copy before the task executes. Note: this is safe as we have the
 					// lock on the task data accesses.
-					if (!task->isRemoteTask()                   // This is the original node.
-						&& dataAccess->allocatedReductionInfo() // It's the first reduction access.
-						&& !dataAccess->readSatisfied()) {      // And not already read satisfied.
-						bytesReductionLaterDataCopies += dataAccess->getAccessRegion().getSize();
+					if (!task->isRemoteTask()                     // This is the original node.
+						&& dataAccess->allocatedReductionInfo()) { // It's the first reduction access.
+						if (dataAccess->readSatisfied()
+							&& targetComputePlace->getType() == nanos6_cluster_device) {
+							// The access is already read satisfied and this task will be executed
+							// remotely. It is still necessary to copy the original value to the
+							// current node. But the "data copy step" that has already been created
+							// is actually the data link step. Create a data copy step to copy in
+							// the original value.
+							Step *originalValueDataCopyStep = Workflow::createDataCopyStep(
+								dataAccess->getLocation(),
+								ClusterManager::getCurrentMemoryNode(),
+								dataAccess->getAccessRegion(),
+								dataAccess,
+								/* isTaskwait */ false,
+								hpDependencyData2);
+							if (originalValueDataCopyStep != nullptr) {
+								workflow->enforceOrder(originalValueDataCopyStep, notificationStep);
+								workflow->addRootStep(originalValueDataCopyStep);
+							}
+						} else if (!dataAccess->readSatisfied()) {
+							// Not yet read satisfied: the data copy will be created if needed later.
+							bytesReductionLaterDataCopies += dataAccess->getAccessRegion().getSize();
+						}
 					}
 
 					// (2) Copy back private copy from an offloaded task
