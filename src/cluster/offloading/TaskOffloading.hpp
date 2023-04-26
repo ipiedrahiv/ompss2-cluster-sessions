@@ -44,7 +44,7 @@ namespace TaskOffloading {
 	//!		remote task
 	//! \param[in] satInfo is the Satisfiability information we are
 	//!		sending
-	void sendSatisfiabilityAndDataSends(SatisfiabilityInfoMap &satInfoMap, DataSendRegionInfoMap &regionInfoMap);
+	void sendSatisfiability(SatisfiabilityInfoMap &satInfoMap);
 
 	//! \brief Propagate satisfiability information for a remote task
 	void propagateSatisfiabilityForHandler(

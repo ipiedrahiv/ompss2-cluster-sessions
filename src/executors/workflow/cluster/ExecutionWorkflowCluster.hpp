@@ -68,19 +68,15 @@ namespace ExecutionWorkflow {
 		reduction_index_t _reductionIndex;
 
 		OffloadedTaskIdManager::OffloadedTaskId _namespacePredecessor;
-		int _namespacePredecessorNode;
 		WriteID _writeID;
 
 		bool _started;
-
-		bool _allowEagerSend;
 
 	public:
 		ClusterDataLinkStep(
 			MemoryPlace const *sourceMemoryPlace,
 			MemoryPlace const *targetMemoryPlace,
-			DataAccess *access,
-			CPUDependencyData &hpDependencyData
+			DataAccess *access
 		) : DataLinkStep(access),
 			_sourceMemoryPlace(sourceMemoryPlace),
 			_targetMemoryPlace(targetMemoryPlace),
@@ -93,13 +89,8 @@ namespace ExecutionWorkflow {
 			_reductionTypeAndOperatorIndex(access->getReductionTypeAndOperatorIndex()),
 			_reductionIndex(access->getReductionIndex()),
 			_namespacePredecessor(OffloadedTaskIdManager::InvalidOffloadedTaskId),
-			_namespacePredecessorNode(VALID_NAMESPACE_UNKNOWN),
 			_writeID((access->getType() == COMMUTATIVE_ACCESS_TYPE) ? 0 : access->getWriteID()),
-			_started(false),
-			// Eager send is not compatible with weakconcurrent accesses, because
-			// an updated location is used to mean that the data was updated by
-			// a (strong) concurrent access.
-			_allowEagerSend(access->getType() != CONCURRENT_ACCESS_TYPE && access->getType() != WRITE_ACCESS_TYPE && access->getType() != REDUCTION_ACCESS_TYPE)
+			_started(false)
 		{
 			access->setDataLinkStep(this);
 
@@ -142,29 +133,19 @@ namespace ExecutionWorkflow {
 									  && targetMemoryPlace != ClusterManager::getCurrentMemoryNode(),
 									  "weakcommutative accesses are not supported for offloaded tasks");
 
-			const int targetNamespace = targetMemoryPlace->getIndex();
-
 			/* Starting workflow on another node: set the namespace and predecessor task */
 			if (ClusterManager::getDisableRemote()) {
 				_namespacePredecessor = OffloadedTaskIdManager::InvalidOffloadedTaskId;
-				_namespacePredecessorNode = VALID_NAMESPACE_NONE;
 			} else {
-				if (access->getValidNamespacePrevious() == targetNamespace) {
-					assert(access->getType() != COMMUTATIVE_ACCESS_TYPE);
-				}
 				_namespacePredecessor = access->getNamespacePredecessor(); // remote propagation valid if predecessor task and offloading node matches
-				_namespacePredecessorNode = access->getValidNamespacePrevious();
 			}
-
-			DataAccessRegistration::setNamespaceSelf(access, targetNamespace, hpDependencyData);
 		}
 
 		void linkRegion(
 			DataAccess const *region,
 			bool read,
 			bool write,
-			TaskOffloading::SatisfiabilityInfoMap &satisfiabilityMap,
-			TaskOffloading::DataSendRegionInfoMap &dataSendRegionInfoMap) override;
+			TaskOffloading::SatisfiabilityInfoMap &satisfiabilityMap) override;
 
 		//! Start the execution of the Step
 		void start() override;
@@ -430,7 +411,6 @@ namespace ExecutionWorkflow {
 	class ClusterExecutionStep : public Step {
 	private:
 		TaskOffloading::SatisfiabilityInfoVector _satInfo;
-		TaskOffloading::DataSendRegionInfoVector _dataSendRegionInfo;
 		ClusterNode *_remoteNode;
 		Task *_task;
 
@@ -438,7 +418,6 @@ namespace ExecutionWorkflow {
 		ClusterExecutionStep(Task *task, ComputePlace *computePlace)
 			: Step(),
 			_satInfo(),
-			_dataSendRegionInfo(),
 			_remoteNode(dynamic_cast<ClusterNode *>(computePlace)),
 			_task(task)
 		{
@@ -499,8 +478,7 @@ namespace ExecutionWorkflow {
 		MemoryPlace const *source,
 		MemoryPlace const *target,
 		DataAccessRegion const &inregion,
-		DataAccess *access,
-		__attribute__((unused)) CPUDependencyData &hpDependencyData
+		DataAccess *access
 	) {
 		assert(source != nullptr);
 		assert(target == ClusterManager::getCurrentMemoryNode());
@@ -551,7 +529,7 @@ namespace ExecutionWorkflow {
 			// is explicit, but when the weakinout is "all memory" there is too much
 			// chance of this kind of thing happening.
 			FatalErrorHandler::failIf(
-				(ClusterManager::getEagerWeakFetch() || ClusterManager::getEagerSend()),
+				ClusterManager::getEagerWeakFetch(),
 				"Set cluster.eager_send = false and cluster.eager_weak_fetch = false for large weak memory access ",
 				region,
 				" of task ",
@@ -637,8 +615,7 @@ namespace ExecutionWorkflow {
 		MemoryPlace const *source,
 		MemoryPlace const *target,
 		DataAccessRegion const &region,
-		DataAccess *access,
-		CPUDependencyData &hpDependencyData
+		DataAccess *access
 	) {
 		assert(target != nullptr);
 		assert(access != nullptr);
@@ -663,11 +640,11 @@ namespace ExecutionWorkflow {
 		}
 
 		if (target == current) {
-			return clusterFetchData(source, target, region, access, hpDependencyData);
+			return clusterFetchData(source, target, region, access);
 		}
 
 		assert(access->getObjectType() == access_type);
-		return new ClusterDataLinkStep(source, target, access, hpDependencyData);
+		return new ClusterDataLinkStep(source, target, access);
 	}
 }
 

@@ -135,8 +135,7 @@ namespace ExecutionWorkflow {
 			const DataAccess *,
 			bool /*read*/,
 			bool /*write*/,
-			TaskOffloading::SatisfiabilityInfoMap &, /*hpDependencyData*/
-			TaskOffloading::DataSendRegionInfoMap &
+			TaskOffloading::SatisfiabilityInfoMap &
 		) {
 			//clusterCout << "Link: (" << access->getOriginator()->getLabel() <<"): " << region << std::endl;
 		}

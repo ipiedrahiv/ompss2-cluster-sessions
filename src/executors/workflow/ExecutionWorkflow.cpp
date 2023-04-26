@@ -41,8 +41,7 @@ namespace ExecutionWorkflow {
 		MemoryPlace const *targetMemoryPlace,
 		DataAccessRegion const &region,
 		DataAccess *access,
-		bool isTaskwait,
-		CPUDependencyData &hpDependencyData
+		bool isTaskwait
 	) {
 		Step *step;
 		Instrument::enterCreateDataCopyStep(isTaskwait);
@@ -71,11 +70,6 @@ namespace ExecutionWorkflow {
 				(targetMemoryPlace == currentMemoryPlace)
 					? nanos6_host_device : targetMemoryPlace->getType();
 
-		/* Starting workflow for a task on the host: not in a namespace */
-		if (targetType == nanos6_host_device) {
-			access->setValidNamespaceSelf( ClusterManager::getCurrentMemoryNode()->getIndex());
-		}
-
 		if (sourceType == nanos6_host_device || sourceMemoryPlace == ClusterManager::getCurrentMemoryNode()) {
 			if (access->getObjectType() == access_type && !access->isWeak() && access->getType() != READ_ACCESS_TYPE) {
 				// Access already present, and the task will not modify the data (is weak or read-only access),
@@ -89,14 +83,13 @@ namespace ExecutionWorkflow {
 			// clusterCopy. The data doesn't need copying, since being in the
 			// directory implies that the data is uninitialized. But the new
 			// location may need registering in the remote dependency system.
-			step = clusterCopy(sourceMemoryPlace, targetMemoryPlace, region, access, hpDependencyData);
+			step = clusterCopy(sourceMemoryPlace, targetMemoryPlace, region, access);
 		} else {
 			step = _transfersMap[sourceType][targetType](
 				sourceMemoryPlace,
 				targetMemoryPlace,
 				region,
-				access,
-				hpDependencyData
+				access
 			);
 		}
 
@@ -349,25 +342,6 @@ namespace ExecutionWorkflow {
 		}
 
 
-		// We must use local dependency data here, not the CPU's dependency data. This is because
-		// we may currently be creating the workflow for an offloaded task, which happens inside
-		// functions called (indirectly) by DataRegistration::processSatisfiedOriginators.
-		// Note: it is only creating the workflow for an offloaded task that happens immediately,
-		// never the execution of a non-offloaded task. So the CPU dependency data may still be
-		// being used and we cannot use it again! Strictly speaking it is only the satisfied
-		// originators that are still in use, but (1) we need these, because if the task's data
-		// is found by the WriteID, then the data copy step will call setLocationFromWorkflow,
-		// which may indeed create satisfied originators; and (2) it is dangerous to rely on the
-		// fact that DataRegistration::processSatisfiedOriginators is the last to be called in
-		// DataAccessRegistration::processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks,
-		// and therefore the rest of the CPU dependency data isn't needed.
-		CPUDependencyData localDependencyData2;
-		// Thread and CPU while creating the workflow (not when executing the lambda functions)
-		// WorkerThread *createCurrThread = WorkerThread::getCurrentWorkerThread();
-		// CPU * const createCpu = (createCurrThread == nullptr) ? nullptr : createCurrThread->getComputePlace();
-		// CPUDependencyData &hpDependencyData2 =
-		//	(createCpu == nullptr) ? localDependencyData2 : createCpu->getDependencyData();
-		CPUDependencyData &hpDependencyData2 = localDependencyData2;
 		size_t bytesReductionLaterDataCopies = 0;
 
 		DataAccessRegistration::processAllDataAccesses(
@@ -407,8 +381,7 @@ namespace ExecutionWorkflow {
 					targetMemoryPlace,
 					region,
 					dataAccess,
-					false,
-					hpDependencyData2
+					false
 				);
 
 				if (dataCopyRegionStep != nullptr) {
@@ -449,8 +422,7 @@ namespace ExecutionWorkflow {
 								ClusterManager::getCurrentMemoryNode(),
 								dataAccess->getAccessRegion(),
 								dataAccess,
-								/* isTaskwait */ false,
-								hpDependencyData2);
+								/* isTaskwait */ false);
 							if (originalValueDataCopyStep != nullptr) {
 								workflow->enforceOrder(originalValueDataCopyStep, notificationStep);
 								workflow->addRootStep(originalValueDataCopyStep);
@@ -488,24 +460,6 @@ namespace ExecutionWorkflow {
 		task->setWorkflow(workflow);
 		task->setComputePlace(targetComputePlace);
 
-		// There may be some delayed operations from setLocationFromWorkflow, which
-		// is called when a data transfer is not created because it is found by
-		// WriteID.
-		WorkerThread const *currThread = WorkerThread::getCurrentWorkerThread();
-		CPU * const cpu =
-			(currThread == nullptr) ? nullptr : currThread->getComputePlace();
-
-		// Two things may have created delayed operations:
-		// (1) Setting the namespace for this task's accesses may require passing
-		// the valid namespace information to the successor accesses.
-		// (2) Updating the data location if found by WriteID.
-		// We couldn't do either while holding the lock on our task's access
-		// structures (taken by DataAccessRegistration::processAllDataAccesses),
-		// so do all the delayed operations now.
-		// Do this BEFORE starting the workflow, as the access could otherwise be
-		// removed before getting the namespace info.
-		DataAccessRegistration::processDelayedOperationsSatisfiedOriginatorsAndRemovableTasks(hpDependencyData2, cpu, false);
-
 		// Starting the workflow will either execute the task to
 		// completion (if there are not pending transfers for the
 		// task), or it will setup all the Execution Step will
@@ -538,8 +492,7 @@ namespace ExecutionWorkflow {
 				targetLocation,
 				region,
 				taskwaitFragment,
-				true,
-				hpDependencyData
+				true
 			);
 		}
 

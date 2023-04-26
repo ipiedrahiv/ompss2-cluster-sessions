@@ -54,7 +54,7 @@ bool MessageAccessInfo::handleMessage()
 		Task *task = taskInfo._origTask;
 		DataAccessRegistration::accessInfo(task, regionInfo._region, hpDependencyData, regionInfo._noEagerSend, regionInfo._isReadOnly);
 	}
-	TaskOffloading::sendSatisfiabilityAndDataSends(hpDependencyData._satisfiabilityMap, hpDependencyData._dataSendRegionInfoMap);
+	TaskOffloading::sendSatisfiability(hpDependencyData._satisfiabilityMap);
 
 	return true;
 }

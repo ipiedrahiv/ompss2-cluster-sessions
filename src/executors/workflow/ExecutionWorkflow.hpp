@@ -23,7 +23,7 @@ namespace ExecutionWorkflow {
 
 	//! A function that sets up a data transfer between two MemoryPlace
 	typedef std::function<Step *(MemoryPlace const *, MemoryPlace const *,
-		DataAccessRegion const &, DataAccess *, CPUDependencyData &)> data_transfer_function_t;
+		DataAccessRegion const &, DataAccess *)> data_transfer_function_t;
 
 	//! A map that stores the functions that perform data transfers between
 	//! two MemoryPlaces, depending on their type (nanos6_device_t).
@@ -33,8 +33,7 @@ namespace ExecutionWorkflow {
 		__attribute__((unused))MemoryPlace const *source,
 		__attribute__((unused))MemoryPlace const *target,
 		__attribute__((unused))DataAccessRegion const &translation,
-		__attribute__((unused))DataAccess *access,
-		__attribute__((unused))CPUDependencyData &hpDependencyData
+		__attribute__((unused))DataAccess *access
 	) {
 		return nullptr;
 	}
@@ -66,8 +65,7 @@ namespace ExecutionWorkflow {
 			MemoryPlace const *targetMemoryPlace,
 			DataAccessRegion const &region,
 			DataAccess *access,
-			bool isTaskwait,
-			CPUDependencyData &hpDependencyData
+			bool isTaskwait
 		);
 
 		//! \brief Creates an ExecutionStep.

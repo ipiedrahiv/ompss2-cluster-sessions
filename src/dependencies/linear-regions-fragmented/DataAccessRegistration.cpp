@@ -920,8 +920,8 @@ namespace DataAccessRegistration {
 					|| access->getType() == COMMUTATIVE_ACCESS_TYPE) {
 					// Do not propagate in the namespace from a concurrent or commutative
 					// access, as the synchronization is done at the offloader's side.
-					updateOperation._validNamespace = VALID_NAMESPACE_NONE;
-					updateOperation._namespacePredecessor = access->getOriginator()->getOffloadedTaskId();
+					updateOperation._validNamespace = VALID_NAMESPACE_KNOWN;
+					updateOperation._namespacePredecessor = OffloadedTaskIdManager::InvalidOffloadedTaskId;
 					updateOperation._namespaceAccessType = NO_ACCESS_TYPE;
 					access->setPropagatedNamespaceInfo();
 				} else if (access->getObjectType() == access_type
@@ -935,17 +935,16 @@ namespace DataAccessRegistration {
 						updateOperation._validNamespace = access->getValidNamespacePrevious();
 						updateOperation._namespacePredecessor = access->getNamespacePredecessor();
 					} else {
-						updateOperation._validNamespace = VALID_NAMESPACE_NONE;
+						updateOperation._validNamespace = VALID_NAMESPACE_KNOWN;
 						updateOperation._namespacePredecessor = OffloadedTaskIdManager::InvalidOffloadedTaskId;
 					}
 					updateOperation._namespaceAccessType = READ_ACCESS_TYPE;
 					access->setPropagatedNamespaceInfo();
-				} else if ((access->getObjectType() != access_type
-					|| access->getType() != READ_ACCESS_TYPE)
-					&& access->getValidNamespaceSelf() != VALID_NAMESPACE_UNKNOWN) {
+				} else if (access->getObjectType() != access_type
+					|| access->getType() != READ_ACCESS_TYPE) {
 					// Other object types or non-read accesses: propagate own namespace info
 					// to allow remote namespace propagation from this access to the next.
-					updateOperation._validNamespace = access->getValidNamespaceSelf();
+					updateOperation._validNamespace = VALID_NAMESPACE_KNOWN;
 					if (access->getObjectType() == fragment_type) {
 						updateOperation._namespacePredecessor = access->getOriginator()->getOffloadedTaskIdAsParent();
 					} else {
@@ -1219,8 +1218,7 @@ namespace DataAccessRegistration {
 			if (linksRead || linksWrite) {
 				step->linkRegion(
 					access, linksRead, linksWrite,
-					hpDependencyData._satisfiabilityMap,
-					hpDependencyData._dataSendRegionInfoMap);
+					hpDependencyData._satisfiabilityMap);
 			}
 
 			if (updatedStatus._triggersDataLinkRead && updatedStatus._triggersDataLinkWrite) {
@@ -1442,10 +1440,9 @@ namespace DataAccessRegistration {
 				newLocalAccess->setCommutativeSatisfied();
 				newLocalAccess->setReceivedReductionInfo();
 				newLocalAccess->setValidNamespacePrevious(
-					VALID_NAMESPACE_NONE,
+					VALID_NAMESPACE_KNOWN,
 					OffloadedTaskIdManager::InvalidOffloadedTaskId
 				);
-				newLocalAccess->setValidNamespaceSelf(VALID_NAMESPACE_NONE);
 				newLocalAccess->setRegistered();
 		#ifndef NDEBUG
 				newLocalAccess->setReachable();
@@ -1991,7 +1988,7 @@ namespace DataAccessRegistration {
 				// disable namespace propagation out of these accesses (in the calculation
 				// of updateOperation._validNamespace).
 				access->setValidNamespacePrevious(
-					VALID_NAMESPACE_NONE,
+					VALID_NAMESPACE_KNOWN,
 					OffloadedTaskIdManager::InvalidOffloadedTaskId
 				);
 			} else {
@@ -2007,7 +2004,7 @@ namespace DataAccessRegistration {
 						updateOperation._namespacePredecessor
 					);
 				} else {
-					access->setValidNamespacePrevious(VALID_NAMESPACE_NONE, access->getOriginator()->getOffloadedTaskId());
+					access->setValidNamespacePrevious(VALID_NAMESPACE_KNOWN, OffloadedTaskIdManager::InvalidOffloadedTaskId);
 				}
 			}
 		}
@@ -2247,8 +2244,7 @@ namespace DataAccessRegistration {
 				ClusterManager::getCurrentMemoryNode(),
 				access->getAccessRegion(),
 				access,
-				/* isTaskwait */ false,
-				hpDependencyData);
+				/* isTaskwait */ false);
 			if (!newDataCopyStep) {
 				// The initial value is already on the current node, so no data copy step is needed
 				// We still need to ensure that the counter step executes after all the data copy
@@ -2510,8 +2506,8 @@ namespace DataAccessRegistration {
 		assert(hpDependencyData._satisfiedOriginators.empty());
 
 #ifdef USE_CLUSTER
-		TaskOffloading::sendSatisfiabilityAndDataSends(
-			hpDependencyData._satisfiabilityMap, hpDependencyData._dataSendRegionInfoMap
+		TaskOffloading::sendSatisfiability(
+			hpDependencyData._satisfiabilityMap
 		);
 #endif // USE_CLUSTER
 
@@ -3430,7 +3426,7 @@ namespace DataAccessRegistration {
 							DataAccessStatusEffects initialStatusT(targetAccess);
 
 							targetAccess->setValidNamespacePrevious(
-								VALID_NAMESPACE_NONE,
+								VALID_NAMESPACE_KNOWN,
 								OffloadedTaskIdManager::InvalidOffloadedTaskId
 							);
 
@@ -3575,7 +3571,7 @@ namespace DataAccessRegistration {
 
 						targetAccess->setReceivedReductionInfo();
 						targetAccess->setValidNamespacePrevious(
-							VALID_NAMESPACE_NONE,
+							VALID_NAMESPACE_KNOWN,
 							OffloadedTaskIdManager::InvalidOffloadedTaskId
 						);
 
@@ -3939,7 +3935,7 @@ namespace DataAccessRegistration {
 							&& accessOrFragment->hasNext()
 							&& accessOrFragment->getNext()._objectType == taskwait_type)) {
 
-							if (ClusterManager::getEagerSend() || accessOrFragment->getType() == AUTO_ACCESS_TYPE) {
+							if (accessOrFragment->getType() == AUTO_ACCESS_TYPE) {
 								ClusterNode *node = accessOrFragment->getOriginator()->getClusterContext()->getRemoteNode();
 								accessOrFragment->setDisableEagerSend();
 								hpDependencyData._accessInfoMap[node].emplace_back(
@@ -5119,8 +5115,6 @@ namespace DataAccessRegistration {
 					}
 				}
 
-				// access->setValidNamespacePrevious(VALID_NAMESPACE_NONE, nullptr);
-				// access->setValidNamespaceSelf(VALID_NAMESPACE_NONE);
 				DataAccessStatusEffects updatedStatus(access);
 				updatedStatus._allowNamespacePropagation = false;
 
@@ -5182,10 +5176,9 @@ namespace DataAccessRegistration {
 			newLocalAccess->setCommutativeSatisfied();
 			newLocalAccess->setReceivedReductionInfo();
 			newLocalAccess->setValidNamespacePrevious(
-				VALID_NAMESPACE_NONE,
+				VALID_NAMESPACE_KNOWN,
 				OffloadedTaskIdManager::InvalidOffloadedTaskId
 			);
-			newLocalAccess->setValidNamespaceSelf(VALID_NAMESPACE_NONE);
 			newLocalAccess->setRegistered();
 	#ifndef NDEBUG
 			newLocalAccess->setReachable();
@@ -5894,7 +5887,7 @@ namespace DataAccessRegistration {
 			// that were never accessed by the task or a subtask
 			if (task->hasFinished()
 				&& task->isRemoteTask()
-				&& (ClusterManager::getEagerSend() || (task->hasAllMemory() && ClusterManager::autoOptimizeNonAccessed()))) {
+				&& (task->hasAllMemory() && ClusterManager::autoOptimizeNonAccessed())) {
 				accessStructures._accesses.processAll(
 					/* processor: called for each task access */
 					[&](TaskDataAccesses::accesses_t::iterator position) -> bool {
@@ -5902,8 +5895,7 @@ namespace DataAccessRegistration {
 						assert(access != nullptr);
 						if (!access->getPropagateFromNamespace()
 							&& !access->isAutoHasBeenAccessed()
-							&& (ClusterManager::getEagerSend() ||
-								(access->getType() == AUTO_ACCESS_TYPE && !access->isStrongLocalAccess()))
+							&& (access->getType() == AUTO_ACCESS_TYPE && !access->isStrongLocalAccess())
 							&& !access->getDisableEagerSend()) {
 								ClusterNode *node = task->getClusterContext()->getRemoteNode();
 								if (!access->hasSubaccesses()) {
@@ -6190,25 +6182,6 @@ namespace DataAccessRegistration {
 		accessStruct._lock.unlock();
 	}
 
-	// NOTE: you must call setNamespaceSelf with the lock on the data structures
-	// Then call setNamespaceSelfDone without the lock
-	void setNamespaceSelf(DataAccess *access, int targetNamespace, CPUDependencyData &hpDependencyData)
-	{
-		// This is called with the lock on the task accesses already taken
-		Task *task = access->getOriginator();
-		TaskDataAccesses &accessStructures = task->getDataAccesses();
-		assert(!accessStructures.hasBeenDeleted());
-
-		DataAccessStatusEffects initialStatus(access);
-		access->setValidNamespaceSelf(targetNamespace);
-		DataAccessStatusEffects updatedStatus(access);
-
-		handleDataAccessStatusChanges(
-			initialStatus, updatedStatus,
-			access, accessStructures, access->getOriginator(),
-			hpDependencyData);
-	}
-
 	// Remove a list of regions from the namespace's bottom map.
 	// This must be done before the tasks are deleted. Note: some
 	// of the tasks may already be deleted! We can only know they
@@ -6318,7 +6291,7 @@ namespace DataAccessRegistration {
 						bool linksWrite = !dataAccess->writeSatisfied();
 						if (step) {
 							if (linksRead || linksWrite) {
-								step->linkRegion(dataAccess, linksRead, linksWrite, hpDependencyData._satisfiabilityMap, hpDependencyData._dataSendRegionInfoMap);
+								step->linkRegion(dataAccess, linksRead, linksWrite, hpDependencyData._satisfiabilityMap);
 							}
 						}
 					} else {
