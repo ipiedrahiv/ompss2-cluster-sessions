@@ -208,12 +208,6 @@ namespace DataAccessRegistration {
 		bool isTaskwait
 	);
 
-	void setLocationFromWorkflow(
-		DataAccess *access,
-		MemoryPlace const *location,
-		CPUDependencyData &hpDependencyData
-	);
-
 	//! \brief Register a region as a NO_ACCESS_TYPE access within the Task
 	//!
 	//! This is meant to be used for registering a new DataAccess that
