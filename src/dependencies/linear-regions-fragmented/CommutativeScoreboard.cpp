@@ -55,7 +55,7 @@ bool CommutativeScoreboard::addAndEvaluateTask(Task *task, CPUDependencyData &hp
 				region,
 				[&](map_t::iterator mapPosition) -> bool {
 					if (!mapPosition->getAccessRegion().fullyContainedIn(region)) {
-						mapPosition = _map.fragmentByIntersection(mapPosition, region, /* removeIntersection */ false);
+						mapPosition = _map.fragmentByIntersection(mapPosition, region);
 					}
 
 					entry_t &entry = *mapPosition;
@@ -151,7 +151,7 @@ void CommutativeScoreboard::evaluateCompetingTask(
 				region,
 				[&](map_t::iterator mapPosition) -> bool {
 					if (!mapPosition->getAccessRegion().fullyContainedIn(region)) {
-						mapPosition = _map.fragmentByIntersection(mapPosition, region, /* removeIntersection */ false);
+						mapPosition = _map.fragmentByIntersection(mapPosition, region);
 					}
 
 					entry_t &entry = *mapPosition;
@@ -217,7 +217,7 @@ void CommutativeScoreboard::processReleasedCommutativeRegions(CPUDependencyData 
 			taskAndRegion._region,
 			[&](map_t::iterator mapPosition) -> bool {
 				if (!mapPosition->getAccessRegion().fullyContainedIn(taskAndRegion._region)) {
-					mapPosition = _map.fragmentByIntersection(mapPosition, taskAndRegion._region, /* removeIntersection */ false);
+					mapPosition = _map.fragmentByIntersection(mapPosition, taskAndRegion._region);
 				}
 
 				entry_t &entry = *mapPosition;
@@ -269,7 +269,7 @@ void CommutativeScoreboard::endCommutative(const DataAccessRegion region)
 		region,
 		[&](map_t::iterator mapPosition) -> bool {
 				if (!mapPosition->getAccessRegion().fullyContainedIn(region)) {
-					mapPosition = _map.fragmentByIntersection(mapPosition, region, /* removeIntersection */ false);
+					mapPosition = _map.fragmentByIntersection(mapPosition, region);
 				}
 
 				_map.erase(mapPosition);

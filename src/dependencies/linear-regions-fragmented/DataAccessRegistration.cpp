@@ -704,13 +704,16 @@ namespace DataAccessRegistration {
 	);
 	static inline BottomMapEntry *fragmentBottomMapEntry(
 		BottomMapEntry *bottomMapEntry, DataAccessRegion region,
-		TaskDataAccesses &accessStructures, bool removeIntersection = false);
+		TaskDataAccesses &accessStructures);
 	static void handleRemovableTasks(
 		/* inout */ CPUDependencyData::removable_task_list_t &removableTasks);
 	static void handleCompletedTaskwaits(
 		CPUDependencyData &completedTaskwaits,
 		__attribute__((unused)) ComputePlace *computePlace);
 	static inline DataAccess *fragmentAccess(
+		DataAccess *dataAccess, DataAccessRegion const &region,
+		TaskDataAccesses &accessStructures);
+	static inline DataAccess *doFragmentAccessObject(
 		DataAccess *dataAccess, DataAccessRegion const &region,
 		TaskDataAccesses &accessStructures);
 	static inline DataAccess *fragmentAccessObject(
@@ -750,6 +753,7 @@ namespace DataAccessRegistration {
 		if (initialStatus._isRegistered != updatedStatus._isRegistered) {
 			assert(!initialStatus._isRegistered);
 
+			// Note: this code to register a fragment is duplicated inside setUpNewFragment
 			// Count the access
 			if (!initialStatus._isRemovable) {
 				if (accessStructures._removalBlockers == 0) {
@@ -1592,8 +1596,6 @@ namespace DataAccessRegistration {
 		// Copy symbols
 		newFragment->addToSymbols(toBeDuplicated.getSymbols()); // TODO: Consider removing the pointer from declaration and make it a reference
 
-		newFragment->clearRegistered();
-
 		return newFragment;
 	}
 
@@ -1623,7 +1625,7 @@ namespace DataAccessRegistration {
 
 	static inline BottomMapEntry *fragmentBottomMapEntry(
 		BottomMapEntry *bottomMapEntry, DataAccessRegion region,
-		TaskDataAccesses &accessStructures, bool removeIntersection)
+		TaskDataAccesses &accessStructures)
 	{
 		if (bottomMapEntry->getAccessRegion().fullyContainedIn(region)) {
 			// Nothing to fragment
@@ -1637,31 +1639,56 @@ namespace DataAccessRegistration {
 			accessStructures._subaccessBottomMap.iterator_to(*bottomMapEntry);
 		position = accessStructures._subaccessBottomMap.fragmentByIntersection(
 			position, region,
-			removeIntersection,
 			[&](BottomMapEntry const &toBeDuplicated) -> BottomMapEntry * {
 				return ObjectAllocator<BottomMapEntry>::newObject(DataAccessRegion(), toBeDuplicated._link,
 					toBeDuplicated._accessType, toBeDuplicated._reductionTypeAndOperatorIndex);
-			},
-			[&](__attribute__((unused)) BottomMapEntry *fragment, __attribute__((unused)) BottomMapEntry *originalBottomMapEntry) {
 			});
 
-		if (!removeIntersection) {
-			bottomMapEntry = &(*position);
-			assert(bottomMapEntry != nullptr);
-			assert(bottomMapEntry->getAccessRegion().fullyContainedIn(region));
+		bottomMapEntry = &(*position);
+		assert(bottomMapEntry != nullptr);
+		assert(bottomMapEntry->getAccessRegion().fullyContainedIn(region));
 
-			return bottomMapEntry;
-		} else {
-			return nullptr;
-		}
+		return bottomMapEntry;
 	}
 
 
 	static inline void setUpNewFragment(
-		DataAccess *fragment, DataAccess *originalDataAccess,
+		DataAccess *fragment, const DataAccess *originalDataAccess,
 		TaskDataAccesses &accessStructures)
 	{
-		if (fragment != originalDataAccess) {
+		assert (fragment != originalDataAccess);
+
+		if (!fragment->complete()
+			&& fragment->getType() != REDUCTION_ACCESS_TYPE
+			&& fragment->getType() != COMMUTATIVE_ACCESS_TYPE) {
+			// Fast path: fragmenting an access that is definitely not removable
+			// and doesn't need any special accounting.
+#ifndef NDEBUG
+			// Not being complete should imply that the access is not
+			// removable, but check this in the debug version.
+			DataAccessStatusEffects initialStatus(fragment);
+			assert (!initialStatus._isRemovable);
+#endif
+			// Note: this duplicates some of the code inside handleDataAccessStatusChanges.
+			assert(fragment->isRegistered()); // was not cleared by duplicateDataAccess
+			assert (accessStructures._removalBlockers > 0);
+			accessStructures._removalBlockers++;
+
+			/*
+			 * Count the registered taskwait fragments, so know when they
+			 * have all been handled.
+			 */
+			if (fragment->getObjectType() == taskwait_type) {
+				accessStructures._liveTaskwaitFragmentCount++;
+			}
+
+			bool enforcesDependency = !fragment->isWeak() && !fragment->satisfied();
+			if (enforcesDependency) {
+				fragment->getOriginator()->increasePredecessors();
+			}
+		} else {
+			// Slow path: general case for fragmenting an access
+			fragment->clearRegistered();
 			CPUDependencyData hpDependencyData;
 
 			DataAccessStatusEffects initialStatus(fragment);
@@ -1688,31 +1715,23 @@ namespace DataAccessRegistration {
 	 *
 	 */
 
-	static inline DataAccess *fragmentAccessObject(
+	static inline DataAccess *doFragmentAccessObject(
 		DataAccess *dataAccess, DataAccessRegion const &region,
 		TaskDataAccesses &accessStructures)
 	{
 		assert(!dataAccess->hasBeenDiscounted());
 		assert(dataAccess->getObjectType() == access_type);
 
-		if (dataAccess->getAccessRegion().fullyContainedIn(region)) {
-			// Nothing to fragment
-			return dataAccess;
-		}
-
 		TaskDataAccesses::accesses_t::iterator position =
 			accessStructures._accesses.iterator_to(*dataAccess);
 		position = accessStructures._accesses.fragmentByIntersection(
 			position, region,
-			/* removeIntersection */ false,
 			/* duplicator */
 			[&](DataAccess const &toBeDuplicated) -> DataAccess * {
 				assert(toBeDuplicated.isRegistered());
-				return duplicateDataAccess(toBeDuplicated, accessStructures);
-			},
-			/* postprocessor */
-			[&](DataAccess *fragment, DataAccess *originalDataAccess) {
-				setUpNewFragment(fragment, originalDataAccess, accessStructures);
+				DataAccess *fragment =  duplicateDataAccess(toBeDuplicated, accessStructures);
+				setUpNewFragment(fragment, &toBeDuplicated, accessStructures);
+				return fragment;
 			});
 
 		/*
@@ -1723,6 +1742,17 @@ namespace DataAccessRegistration {
 		assert(dataAccess->getAccessRegion().fullyContainedIn(region));
 
 		return dataAccess;
+	}
+
+	static inline DataAccess *fragmentAccessObject(
+		DataAccess *dataAccess, DataAccessRegion const &region,
+		TaskDataAccesses &accessStructures)
+	{
+		if (dataAccess->getAccessRegion().fullyContainedIn(region)) {
+			// Nothing to fragment
+			return dataAccess;
+		}
+		return doFragmentAccessObject(dataAccess, region, accessStructures);
 	}
 
 	/*
@@ -1748,15 +1778,12 @@ namespace DataAccessRegistration {
 			accessStructures._accesses.iterator_to(*dataAccess);
 		position = accessStructures._accesses.fragmentByIntersection(
 			position, region,
-			/* removeIntersection */ false,
 			/* duplicator */
 			[&](DataAccess const &toBeDuplicated) -> DataAccess * {
 				assert(!toBeDuplicated.isRegistered());
-				return duplicateDataAccess(toBeDuplicated, accessStructures);
-			},
-			/* postprocessor */
-			[&](DataAccess *fragment, DataAccess *originalDataAccess) {
-				fragment->setUpNewFragment(originalDataAccess->getInstrumentationId());
+				DataAccess *fragment = duplicateDataAccess(toBeDuplicated, accessStructures);
+				setUpNewFragment(fragment, &toBeDuplicated, accessStructures);
+				return fragment;
 			});
 
 		/*
@@ -1786,15 +1813,12 @@ namespace DataAccessRegistration {
 			accessStructures._accessFragments.iterator_to(*dataAccess);
 		position = accessStructures._accessFragments.fragmentByIntersection(
 			position, region,
-			/* removeIntersection */ false,
 			/* duplicator */
 			[&](DataAccess const &toBeDuplicated) -> DataAccess * {
 				assert(toBeDuplicated.isRegistered());
-				return duplicateDataAccess(toBeDuplicated, accessStructures);
-			},
-			/* postprocessor */
-			[&](DataAccess *fragment, DataAccess *originalDataAccess) {
-				setUpNewFragment(fragment, originalDataAccess, accessStructures);
+				DataAccess *fragment =  duplicateDataAccess(toBeDuplicated, accessStructures);
+				setUpNewFragment(fragment, &toBeDuplicated, accessStructures);
+				return fragment;
 			});
 
 		/*
@@ -1824,15 +1848,12 @@ namespace DataAccessRegistration {
 			accessStructures._taskwaitFragments.iterator_to(*dataAccess);
 		position = accessStructures._taskwaitFragments.fragmentByIntersection(
 			position, region,
-			/* removeIntersection */ false,
 			/* duplicator */
 			[&](DataAccess const &toBeDuplicated) -> DataAccess * {
 				assert(toBeDuplicated.isRegistered());
-				return duplicateDataAccess(toBeDuplicated, accessStructures);
-			},
-			/* postprocessor */
-			[&](DataAccess *fragment, DataAccess *originalDataAccess) {
-				setUpNewFragment(fragment, originalDataAccess, accessStructures);
+				DataAccess *fragment =  duplicateDataAccess(toBeDuplicated, accessStructures);
+				setUpNewFragment(fragment, &toBeDuplicated, accessStructures);
+				return fragment;
 			});
 
 		/*
@@ -1890,7 +1911,7 @@ namespace DataAccessRegistration {
 		}
 
 		if (dataAccess->getObjectType() == access_type) {
-			return fragmentAccessObject(dataAccess, region, accessStructures);
+			return doFragmentAccessObject(dataAccess, region, accessStructures);
 		} else if (dataAccess->getObjectType() == fragment_type) {
 			return fragmentFragmentObject(dataAccess, region, accessStructures);
 		} else {

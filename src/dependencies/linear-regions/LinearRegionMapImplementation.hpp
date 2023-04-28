@@ -192,8 +192,7 @@ bool LinearRegionMap<ContentType>::contains(DataAccessRegion const &region)
 template <typename ContentType>
 typename LinearRegionMap<ContentType>::iterator LinearRegionMap<ContentType>::fragmentByIntersection(
 	typename LinearRegionMap<ContentType>::iterator position,
-	DataAccessRegion const &fragmenterRegion,
-	bool removeIntersection
+	DataAccessRegion const &fragmenterRegion
 ) {
 	iterator intersectionPosition = end();
 	DataAccessRegion originalRegion = position->getAccessRegion();
@@ -215,21 +214,14 @@ typename LinearRegionMap<ContentType>::iterator LinearRegionMap<ContentType>::fr
 		},
 		/* intersection */
 		[&](DataAccessRegion const &region) {
-			if (!removeIntersection) {
-				if (!alreadyShrinked) {
-					position->getAccessRegion() = region;
-					alreadyShrinked = true;
-					intersectionPosition = position;
-				} else {
-					ContentType newContents(contents);
-					newContents.getAccessRegion() = region;
-					intersectionPosition = insert(newContents);
-				}
+			if (!alreadyShrinked) {
+				position->getAccessRegion() = region;
+				alreadyShrinked = true;
+				intersectionPosition = position;
 			} else {
-				if (!alreadyShrinked) {
-					erase(position);
-					alreadyShrinked = true;
-				}
+				ContentType newContents(contents);
+				newContents.getAccessRegion() = region;
+				intersectionPosition = insert(newContents);
 			}
 		},
 		/* fragmeterRegion only */

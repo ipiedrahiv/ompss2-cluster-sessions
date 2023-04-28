@@ -334,8 +334,7 @@ public:
 
 	iterator fragmentByIntersection(
 		iterator position,
-		DataAccessRegion const &region,
-		bool removeIntersection
+		DataAccessRegion const &region
 	);
 
 };

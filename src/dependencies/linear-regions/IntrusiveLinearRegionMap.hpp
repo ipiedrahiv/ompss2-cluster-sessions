@@ -235,9 +235,22 @@ public:
 	iterator fragmentByIntersection(
 		iterator position,
 		DataAccessRegion const &region,
-		bool removeIntersection,
 		std::function<ContentType *(ContentType &)> duplicator,
 		std::function<void(ContentType *, ContentType *)> postprocessor
+	);
+
+	//! \brief Fragment an already existing node by the intersection of a given region
+	//!
+	//! \param[in] position an iterator to the node to be fragmented
+	//! \param[in] region the DataAccessRegion that determines the fragmentation point(s)
+	//! \param[in] removeIntersection true if the intersection is to be left empty
+	//! \param[in] duplicator a lambda that receives a reference to a node and returns a pointer to a new copy
+	//!
+	//! \returns an iterator to the intersecting fragment or end() if removeIntersection is true
+	iterator fragmentByIntersection(
+		iterator position,
+		DataAccessRegion const &region,
+		std::function<ContentType *(ContentType &)> duplicator
 	);
 
 	//! \brief Fragment any node that intersects by a intersection boundary
