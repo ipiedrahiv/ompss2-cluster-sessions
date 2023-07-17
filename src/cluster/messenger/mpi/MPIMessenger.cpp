@@ -29,6 +29,8 @@
 #include <mpi.h>
 #pragma GCC visibility pop
 
+#include "messenger/mpi/TAMPIInteroperability.hpp"
+
 // Split a data transfer by the max message size
 void MPIMessenger::forEachDataPart(
 	void *startAddress,
@@ -475,7 +477,9 @@ void MPIMessenger::sendMessage(Message *msg, ClusterNode const *toNode, bool blo
 
 	if (block) {
 		Instrument::MPILock();
+		disableTAMPITaskAwareness();
 		ret = MPI_Send((void *)delv, msgSize, MPI_BYTE, mpiDst, tag, INTRA_COMM);
+		enableTAMPITaskAwareness();
 		Instrument::MPIUnLock();
 		MPIErrorHandler::handle(ret, INTRA_COMM);
 
@@ -529,7 +533,9 @@ DataTransfer *MPIMessenger::sendData(
 			messageId,
 			[&](void *currAddress, size_t currSize, int currMessageId) {
 				int tag = getTag(currMessageId);
+				disableTAMPITaskAwareness();
 				ret = MPI_Send(currAddress, currSize, MPI_BYTE, mpiDst, tag, INTRA_COMM_DATA_RAW);
+				enableTAMPITaskAwareness();
 				MPIErrorHandler::handle(ret, INTRA_COMM_DATA_RAW);
 			}
 		);
@@ -589,7 +595,9 @@ DataTransfer *MPIMessenger::fetchData(
 			messageId,
 			[&](void *currAddress, size_t currSize, int currMessageId) {
 				int tag = getTag(currMessageId);
+				disableTAMPITaskAwareness();
 				ret = MPI_Recv(currAddress, currSize, MPI_BYTE, mpiSrc, tag, INTRA_COMM_DATA_RAW, MPI_STATUS_IGNORE);
+				enableTAMPITaskAwareness();
 				MPIErrorHandler::handle(ret, INTRA_COMM_DATA_RAW);
 			}
 		);
@@ -624,14 +632,18 @@ DataTransfer *MPIMessenger::fetchData(
 
 void MPIMessenger::synchronizeWorld(void)
 {
+	disableTAMPITaskAwareness();
 	int ret = MPI_Barrier(MPI_COMM_WORLD);
+	enableTAMPITaskAwareness();
 	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
 }
 
 void MPIMessenger::synchronizeAll(void)
 {
 	Instrument::MPILock();
+	disableTAMPITaskAwareness();
 	int ret = MPI_Barrier(INTRA_COMM);
+	enableTAMPITaskAwareness();
 	Instrument::MPIUnLock();
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 }
@@ -681,8 +693,10 @@ Message *MPIMessenger::checkMail(void)
 	Instrument::clusterReceiveMessage(type, nullptr);
 
 	Instrument::MPILock();
+	disableTAMPITaskAwareness();
 	ret = MPI_Recv((void *)dlv, count, MPI_BYTE, status.MPI_SOURCE,
 		status.MPI_TAG, INTRA_COMM, MPI_STATUS_IGNORE);
+	enableTAMPITaskAwareness();
 	Instrument::MPIUnLock();
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 

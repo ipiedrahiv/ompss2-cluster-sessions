@@ -33,6 +33,8 @@
 #include <mpi.h>
 #pragma GCC visibility pop
 
+#include "cluster/messenger/mpi/TAMPIInteroperability.hpp"
+
 ClusterHybridInterfaceFile::ClusterHybridInterfaceFile() :
 	_allocFileThisApprank(nullptr)
 {
@@ -84,6 +86,7 @@ void ClusterHybridInterfaceFile::initialize(int externalRank,
 
 	// After this barrier, all ranks can assume that the .hybrid/ directory
 	// has been created by the first external rank
+	disableTAMPITaskAwareness();
 	MPI_Barrier(MPI_COMM_WORLD);
 
 	// Filenames for this apprank's core allocation (using global policy)
@@ -103,6 +106,7 @@ void ClusterHybridInterfaceFile::initialize(int externalRank,
 	_utilizationFile.open(utilizationFilename);
 
 	MPI_Barrier(MPI_COMM_WORLD);
+	enableTAMPITaskAwareness();
 	sleep(1);
 
 	/*

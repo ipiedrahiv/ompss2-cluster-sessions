@@ -1392,6 +1392,7 @@ noinst_HEADERS += \
 	src/cluster/messenger/mpi/MPIDataTransfer.hpp \
 	src/cluster/messenger/mpi/MPIMessenger.hpp \
 	src/cluster/messenger/mpi/MPIErrorHandler.hpp \
+	src/cluster/messenger/mpi/TAMPIInteroperability.hpp \
 	src/cluster/offloading/DataSendInfo.hpp \
 	src/cluster/offloading/RemoteTasksInfoMap.hpp \
 	src/cluster/offloading/ClusterTaskContext.hpp \
