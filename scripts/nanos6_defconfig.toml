@@ -83,6 +83,11 @@
 	# Set to false will use the default page size, which is arch-dependent
 	discover_pagesize = true
 
+__require_TAMPI
+[tampi]
+	enabled = true
+__!require_TAMPI
+
 __require_DLB
 [dlb]
 	# Enable DLB support. Default is false
