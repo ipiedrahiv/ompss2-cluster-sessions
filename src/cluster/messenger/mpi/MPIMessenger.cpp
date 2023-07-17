@@ -4,6 +4,7 @@
 	Copyright (C) 2019-2020 Barcelona Supercomputing Center (BSC)
 */
 
+#include <dlfcn.h>
 #include <cstdlib>
 #include <vector>
 #include <algorithm>
@@ -180,6 +181,26 @@ void MPIMessenger::splitCommunicator(const std::string &clusterSplit)
 MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 {
 	int support, ret;
+
+#if HAVE_TAMPI
+	// By default, TAMPI is initialized by the user's call to MPI_Init_thread.
+	// It normally creates a task, which will periodically poll for completion
+	// of its MPI requests. Right now, it is far too early for TAMPI to create
+	// a task, as the runtime hasn't yet been fully initialized. Moreover,
+	// TAMPI must be initialized within a task context, not at an arbitrary
+	// point in the runtime outside a task. We set TAMPI_PROPERTY_AUTO_INIT to
+	// false, and will call TAMPI_Init later when it is safe to do so, inside
+	// the main or namespace task.
+	ret = TAMPI_Property_set(TAMPI_PROPERTY_AUTO_INIT, 0);
+	assert(ret == MPI_SUCCESS);
+#else
+	// Check whether the user linked the application with TAMPI. If so, Nanos6 has to be
+	// built with TAMPI, but it isn't (HAVE_TAMPI is 0). Calling MPI_Init_thread would
+	// initialize TAMPI and cause an obscure failure when it tries to use the Nanos6 API
+	// before the runtime has fully initialized. Raise an error instead.
+	void *symbol = dlsym(RTLD_DEFAULT, "TAMPI_Blocking_enabled");
+	FatalErrorHandler::failIf(symbol != nullptr, "To use OmpSs-2@Cluster with TAMPI, build Nanos6 with --with-tampi=<prefix>");
+#endif
 
 	ret = MPI_Init_thread(&_argc, &_argv, MPI_THREAD_MULTIPLE, &support);
 	MPIErrorHandler::handle(ret, MPI_COMM_WORLD);
@@ -901,4 +922,39 @@ int MPIMessenger::messengerShrink(int delta)
 
 	assert(newsize == _wsize);
 	return _wsize;
+}
+
+void MPIMessenger::TAMPIInit()
+{
+#if HAVE_TAMPI
+	ConfigVariable<bool> tampiEnabled("tampi.enabled");
+	int requested = tampiEnabled ? MPI_TASK_MULTIPLE : MPI_THREAD_MULTIPLE;
+	int support, ret;
+
+	// Note: if TAMPI_Init gives the error "Intializing TAMPI before MPI is invalid"
+	// or similar, it is likely due to the library linking order. TAMPI must be
+	// linked before Extrae and the MPI library.
+	//
+	// If you LD_PRELOAD Extrae, then LD_PRELOAD both TAMPI and Extrae, with TAMPI first.
+	// If the application is linked with MPI, then either also link it with TAMPI or
+	// LD_PRELOAD TAMPI.
+
+	ret = TAMPI_Init(requested, &support);
+	if (ret != MPI_SUCCESS || support != requested) {
+		std::cerr << "Could not initialize TAMPI" << std::endl;
+		abort();
+	}
+	ClusterManager::synchronizeAll();
+	_tampiInitialized = true;
+#endif
+}
+
+void MPIMessenger::TAMPIFinalize()
+{
+#if HAVE_TAMPI
+	__attribute__((unused)) int ret;
+	assert(_tampiInitialized);
+	ret = TAMPI_Finalize();
+	assert(ret == MPI_SUCCESS);
+#endif
 }

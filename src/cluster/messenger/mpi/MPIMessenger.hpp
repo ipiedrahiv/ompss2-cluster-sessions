@@ -47,6 +47,7 @@ private:
 	// this
 	SpinLock _abortLock;
 
+	bool _tampiInitialized = false;
 
 	int convertToBitMask(int mpi_ub_tag) const;
 
@@ -323,6 +324,14 @@ public:
 	MPI_Comm getCommunicator() const
 	{
 		return INTRA_COMM;
+	}
+
+	inline void TAMPIInit();
+	inline void TAMPIFinalize();
+
+	inline bool TAMPIInitialized() const
+	{
+		return _tampiInitialized;
 	}
 };
 

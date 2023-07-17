@@ -229,6 +229,17 @@ void ClusterManager::postinitialize()
 	 * among the instances on the same node.
 	 */
 	if (_singleton->_msn) {
+#if HAVE_TAMPI
+		// TAMPI is initialized either before running main (on rank 0) or at the start of the
+		// namespace task (on the other ranks). In either case this proceeds concurrently with
+		// postinitialize. Initialization of TAMPI has a barrier to ensure a well-defined point
+		// at which TAMPI has been enabled, that is known to be before main starts executing. We
+		// need to wait for this before doing the below barrier, otherwise the two barriers will
+		// get mixed up.
+		while(!TAMPIInitialized()) {
+			usleep(1000);
+		}
+#endif
 		_singleton->_msn->synchronizeWorld();
 	}
 
