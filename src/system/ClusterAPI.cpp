@@ -98,6 +98,11 @@ extern "C" {
 		ClusterMemoryManagement::lfree(ptr, size);
 	}
 
+	void nanos6_lfree1(void *ptr)
+	{
+		ClusterMemoryManagement::lfree(ptr);
+	}
+
 	void nanos6_set_early_release(nanos6_early_release_t early_release)
 	{
 		WorkerThread *currentThread = WorkerThread::getCurrentWorkerThread();

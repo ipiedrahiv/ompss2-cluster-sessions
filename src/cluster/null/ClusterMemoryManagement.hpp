@@ -31,6 +31,11 @@ namespace ClusterMemoryManagement {
 	{
 		free(ptr);
 	}
+
+	inline void lfree1(void *ptr)
+	{
+		free(ptr);
+	}
 }
 
 #endif /* CLUSTER_MEMORY_MANAGEMENT_HPP */

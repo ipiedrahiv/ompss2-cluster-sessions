@@ -20,6 +20,7 @@ RESOLVE_API_FUNCTION(nanos6_dmalloc, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_dfree, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_lmalloc, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_lfree, "cluster", NULL);
+RESOLVE_API_FUNCTION(nanos6_lfree1, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_set_early_release, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_get_app_communicator, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_cluster_resize, "cluster", NULL);

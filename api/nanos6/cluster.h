@@ -168,6 +168,10 @@ void *nanos6_lmalloc(size_t size);
 //! \param[in] size is the size of the local memory allocation
 void nanos6_lfree(void *ptr, size_t size);
 
+//! \brief Deallocate a local array. It must be called on the node that did the lmalloc.
+//!
+//! \param[in] ptr is a pointer to memory previously allocated with nanos6_lmalloc
+void nanos6_lfree1(void *ptr);
 
 //! \brief Set early release.  Temporary until pragma clauses defined
 //!
