@@ -491,7 +491,7 @@ public:
 		size_t pageSize = HardwareInfo::getPageSize();
 		pageSize = (size <= _realPageSize) ? pageSize : _realPageSize;
 #ifdef USE_CLUSTER
-		ClusterMemoryManagement::lfree(ptr, size);
+		ClusterMemoryManagement::lfree(ptr, size, /* checkSize */ false);
 #else
 		if (size < pageSize) {
 			std::free(ptr);

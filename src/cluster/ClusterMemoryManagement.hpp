@@ -99,7 +99,9 @@ public:
 
 	static void *lmalloc(size_t size);
 
-	static void lfree(void *ptr, size_t size);
+	static void lfree(void *ptr, size_t size, bool checkSize = true);
+
+	static void lfree(void *ptr);
 };
 
 #endif /* CLUSTER_MEMORY_MANAGEMENT_HPP */
