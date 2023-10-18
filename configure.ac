@@ -243,6 +243,9 @@ if test x"${ac_use_cluster}" = x"yes" ; then
 	AC_DEFINE([USE_CLUSTER], [1], [Define if Cluster is enabled.])
 fi
 
+# Check TAMPI (after cluster)
+AC_CHECK_TAMPI
+
 # Check if we should enable Execution Workflow support
 AC_ARG_ENABLE(
 	[execution-workflow],
@@ -477,6 +480,16 @@ if test x"${ac_use_dlb}" = x"yes" ; then
 	AC_MSG_RESULT([yes])
 	_AS_ECHO([   DLB CPPFLAGS... ${dlb_CPPFLAGS}])
 	_AS_ECHO([   DLB LIBS... ${dlb_LIBS}])
+else
+	AC_MSG_RESULT([no])
+fi
+
+_AS_ECHO([])
+_AS_ECHO_N([   TAMPI is enabled... ])
+if test x"${ac_use_tampi}" = x"yes" ; then
+	AC_MSG_RESULT([yes])
+	_AS_ECHO([   TAMPI CPPFLAGS... ${tampi_CPPFLAGS}])
+	_AS_ECHO([   TAMPI LIBS... ${tampi_LIBS}])
 else
 	AC_MSG_RESULT([no])
 fi

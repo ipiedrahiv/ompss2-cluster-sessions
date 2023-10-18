@@ -751,6 +751,10 @@ cluster_cppflags += \
 	-I$(srcdir)/src/cluster/hybrid/null
 endif
 
+if HAVE_TAMPI
+cluster_cppflags += $(tampi_CPPFLAGS) -DHAVE_TAMPI
+endif
+
 common_sources += $(cpu_manager_sources)
 
 
@@ -1388,6 +1392,7 @@ noinst_HEADERS += \
 	src/cluster/messenger/mpi/MPIDataTransfer.hpp \
 	src/cluster/messenger/mpi/MPIMessenger.hpp \
 	src/cluster/messenger/mpi/MPIErrorHandler.hpp \
+	src/cluster/messenger/mpi/TAMPIInteroperability.hpp \
 	src/cluster/offloading/DataSendInfo.hpp \
 	src/cluster/offloading/RemoteTasksInfoMap.hpp \
 	src/cluster/offloading/ClusterTaskContext.hpp \
@@ -1446,8 +1451,9 @@ endif
 
 dist_memory_sources = $(memory_default_sources) $(memory_debug_sources)
 
+# Note: TAMPI goes first (before MPI library)
 common_libnanos6_cppflags = $(BOOST_CPPFLAGS) -DBOOST_ENABLE_ASSERT_DEBUG_HANDLER $(PTHREAD_CFLAGS) $(hwloc_CFLAGS) $(libnuma_CPPFLAGS) $(CUDA_CFLAGS) $(MPI_CXXFLAGS) $(memkind_CPPFLAGS) $(cluster_cppflags) $(workflow_cppflags) $(monitoring_cppflags) $(cpu_manager_cppflags) $(hardware_counters_cppflags) $(jemalloc_CPPFLAGS) $(libslurm_CPPFLAGS)
-common_libnanos6_ldflags = $(openacc_LIBS) $(AM_LDFLAGS) -version-info $(lib_current):$(lib_revision):$(lib_age) $(jemalloc_LIBS) $(PTHREAD_CFLAGS) $(PTHREAD_LIBS) $(LDFLAGS_NOUNDEFINED) $(hwloc_LIBS) $(libnuma_LIBS) $(DLOPEN_LIBS) $(CUDA_LIBS) $(MPI_CXXLDFLAGS) $(memkind_LIBS) $(cpu_manager_ldflags) $(hardware_counters_ldflags) $(libslurm_LIBS)
+common_libnanos6_ldflags = $(tampi_LIBS) $(openacc_LIBS) $(AM_LDFLAGS) -version-info $(lib_current):$(lib_revision):$(lib_age) $(jemalloc_LIBS) $(PTHREAD_CFLAGS) $(PTHREAD_LIBS) $(LDFLAGS_NOUNDEFINED) $(hwloc_LIBS) $(libnuma_LIBS) $(DLOPEN_LIBS) $(CUDA_LIBS) $(MPI_CXXLDFLAGS) $(memkind_LIBS) $(cpu_manager_ldflags) $(hardware_counters_ldflags) $(libslurm_LIBS)
 
 # This is needed for debuggable spinlocks
 common_sources += $(introspection_sources)
@@ -2065,6 +2071,10 @@ endif
 
 if !HAVE_DLB
 disabled_config_features += "DLB"
+endif
+
+if !HAVE_TAMPI
+disabled_config_features += "TAMPI"
 endif
 
 if !BUILD_CTF_INSTRUMENTATION

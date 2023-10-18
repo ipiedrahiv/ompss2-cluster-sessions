@@ -71,6 +71,9 @@ ConfigCentral::ConfigCentral() :
 	registerOption<bool_t>("dlb.enable_drom", true);
 	registerOption<bool_t>("dlb.enable_lewi", true);
 
+	// TAMPI
+	registerOption<bool_t>("tampi.enabled", true);
+
 	// Hardware counters
 	registerOption<bool_t>("hardware_counters.verbose", false);
 	registerOption<string_t>("hardware_counters.verbose_file", "nanos6-output-hwcounters.txt");

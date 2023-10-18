@@ -111,7 +111,30 @@ namespace ExecutionWorkflow {
 
 				// Run the task
 				std::atomic_thread_fence(std::memory_order_acquire);
+
+				bool initAndShutdownTAMPI = false;
+
+				if (_task->isMainTask()
+					|| (!ClusterManager::isMasterNode() && _task->isNodeNamespace())) {
+					initAndShutdownTAMPI = true;
+					// Initialize TAMPI before running main (rank 0) or the
+					// namespace task (other ranks).  TAMPI is normally
+					// initialized by MPI_Init_thread, but we disabled this
+					// auto-initialization before calling MPI_Init_thread.
+					// TAMPI must be initialized inside a task context when the
+					// runtime is fully initialized (able to create tasks).
+					ClusterManager::TAMPIInit();
+				}
+
 				_task->body(translationTable);
+
+				if (initAndShutdownTAMPI) {
+					// Finalize TAMPI before waiting for the spawned functions to have ended,
+					// since TAMPI has a spawned function of its own. TAMPI calls nanos6_wait_for()
+					// in the finalize process, so it should be called inside a task context.
+					ClusterManager::TAMPIFinalize();
+				}
+
 				if (_task->isIf0()) {
 					If0Task::executeNonInline(currentThread, _task, cpu);
 				}

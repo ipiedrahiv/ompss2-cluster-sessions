@@ -210,6 +210,10 @@ public:
 
 	//! Get rank for Extrae traces for other internal ranks
 	virtual int internalRankToInstrumentationRank(int i) const = 0;
+
+	virtual void TAMPIInit() = 0;
+	virtual void TAMPIFinalize() = 0;
+	virtual bool TAMPIInitialized() const = 0;
 };
 
 #endif /* MESSENGER_HPP */

@@ -36,7 +36,7 @@ In addition to the build requirements, the following libraries and tools enable 
 1. [DLB](https://pm.bsc.es/dlb) to enable dynamic management and sharing of computing resources
 1. [jemalloc](https://github.com/jemalloc/jemalloc) to use jemalloc as the default memory allocator, providing better performance than the default glibc implementation. Jemalloc must be compiled with `--enable-stats` and `--with-jemalloc-prefix=nanos6_je_` to link with the runtime
 1. [PAPI](http://icl.utk.edu/papi/software/) >= 5.6.0
-
+1. [TAMPI](https://github.com/bsc-pm/tampi) >= 2.1
 
 ## Build procedure
 
@@ -74,6 +74,7 @@ The configure script accepts the following options:
 1. `--enable-openacc` to enable support for OpenACC tasks; requires PGI compilers
 1. `--with-pgi=prefix` to specify the prefix of the PGI or NVIDIA HPC-SDK compilers installation, in case they are not in `$PATH`
 1. `--enable-chrono-arch` to enable an architecture-based timer for the monitoring infrastructure
+1. `--with-tampi=prefix` to specify the prefix of the TAMPI installation when building with cluster support
 
 The location of elfutils and hwloc is always retrieved through pkg-config.
 If they are installed in non-standard locations, pkg-config can be told where to find them through the `PKG_CONFIG_PATH` environment variable.

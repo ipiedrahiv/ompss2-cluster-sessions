@@ -472,6 +472,35 @@ public:
 		}
 	}
 
+	static void TAMPIInit()
+	{
+		assert(_singleton != nullptr);
+		if (inClusterMode()) {
+			assert(_singleton->_msn != nullptr);
+			_singleton->_msn->TAMPIInit();
+		}
+	}
+
+	static void TAMPIFinalize()
+	{
+		assert(_singleton != nullptr);
+		if (inClusterMode()) {
+			assert(_singleton->_msn != nullptr);
+			_singleton->_msn->TAMPIFinalize();
+		}
+	}
+
+	static bool TAMPIInitialized()
+	{
+		assert(_singleton != nullptr);
+		if (inClusterMode()) {
+			assert(_singleton->_msn != nullptr);
+			return _singleton->_msn->TAMPIInitialized();
+		} else {
+			return true;
+		}
+	}
+
 	//! \brief Functions required to init and finish.
 	//!
 	//! Init is called in the boostrap and finish in the SysFInish Message handler.
