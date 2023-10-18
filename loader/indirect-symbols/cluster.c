@@ -233,6 +233,19 @@ void nanos6_lfree(void *ptr, size_t size)
 	(*symbol)(ptr, size);
 }
 
+void nanos6_lfree1(void *ptr)
+{
+	typedef void nanos6_lfree1_t(void *);
+
+	static nanos6_lfree1_t *symbol = NULL;
+	if (__builtin_expect(symbol == NULL, 0)) {
+		symbol = (nanos6_lfree1_t *) _nanos6_resolve_symbol(
+				"nanos6_lfree1", "cluster", NULL);
+	}
+
+	(*symbol)(ptr);
+}
+
 void nanos6_set_early_release(nanos6_early_release_t early_release)
 {
 	typedef void nanos6_set_early_release_t(nanos6_early_release_t);
@@ -321,4 +334,3 @@ int nanos6_get_cluster_info(nanos6_cluster_info_t *info)
 
 	(*symbol)(info);
 }
-

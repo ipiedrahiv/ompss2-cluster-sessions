@@ -341,8 +341,14 @@ public:
 		void *res = nullptr;
 		{
 #ifdef USE_CLUSTER
-			res = ClusterMemoryManagement::lmalloc(size);
+			// Allocate
+			void *rawPtr = ClusterMemoryManagement::lmalloc(size + pageSize);
+
+			// Round up to the next page boundary
+			// TODO Fix the memory leak
+			res = (void *)( ((size_t)rawPtr + pageSize-1) & ~(pageSize-1));
 			assert(((size_t)res & (pageSize-1)) == 0);
+
 			// numa_interleave_memory only works for new pages: so first use madvise
 			madvise(res, size, MADV_DONTNEED);
 #else
@@ -485,7 +491,7 @@ public:
 		size_t pageSize = HardwareInfo::getPageSize();
 		pageSize = (size <= _realPageSize) ? pageSize : _realPageSize;
 #ifdef USE_CLUSTER
-		ClusterMemoryManagement::lfree(ptr, size);
+		ClusterMemoryManagement::lfree(ptr, size, /* checkSize */ false);
 #else
 		if (size < pageSize) {
 			std::free(ptr);

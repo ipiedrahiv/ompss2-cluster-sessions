@@ -217,11 +217,17 @@ void *ClusterMemoryManagement::lmalloc(size_t size)
 	size_t cacheLineSize = HardwareInfo::getCacheLineSize();
 	size_t roundedSize = (size + cacheLineSize - 1) & ~(cacheLineSize - 1);
 
+	// Allocate an extra cache line and keep a copy of the lmalloc's size.
+	assert(cacheLineSize >= sizeof(size_t));
+	size_t totalSize = cacheLineSize + roundedSize;
+	void *rawptr = MemoryAllocator::alloc(totalSize);
+	void *lptr = (void *)((char *)rawptr + cacheLineSize);
+	*((size_t *)rawptr) = size;
+
 	// Register the lmalloc in the task's dependency system.  This is needed for taskwait
 	// noflush, as a place to put the location information. Ideally we should register the whole
 	// local region all at once. At the moment the lmalloc and lfree have to be in the same
 	// task, which is a bit restrictive.
-	void *lptr = MemoryAllocator::alloc(roundedSize);
 	WorkerThread *currentThread = WorkerThread::getCurrentWorkerThread();
 	Task *task = currentThread->getTask();
 	DataAccessRegion allocatedRegion(lptr, roundedSize);
@@ -234,13 +240,47 @@ void *ClusterMemoryManagement::lmalloc(size_t size)
 	return lptr;
 }
 
-void ClusterMemoryManagement::lfree(void *ptr, size_t size)
+void ClusterMemoryManagement::lfree(void *ptr, size_t size, bool checkSize)
 {
 	size_t cacheLineSize = HardwareInfo::getCacheLineSize();
 	size_t roundedSize = (size + cacheLineSize - 1) & ~(cacheLineSize - 1);
+
+	// Unregister the region from the task
 	DataAccessRegion allocatedRegion(ptr, roundedSize);
 	WorkerThread *currentThread = WorkerThread::getCurrentWorkerThread();
 	Task *task = currentThread->getTask();
 	DataAccessRegistration::unregisterLocalAccess(task, allocatedRegion, /* isStack */ false);
-	MemoryAllocator::free(ptr, roundedSize);
+
+	// Check that the passed size is correct, i.e. that it matches the value
+	// recorded by lmalloc. Note: if the lmalloc was done on a different node,
+	// identified by isLocalRegion returning false, then we cannot do this
+	// check. This is because the recorded size, being outside the region given
+	// to the application, will not have been copied here (by an access of a
+	// parent task).
+	void *rawptr = (void *)((char *)ptr - cacheLineSize);
+	if (checkSize && VirtualMemoryManagement::isLocalRegion(allocatedRegion)) {
+		size_t actualSize = *((size_t *)rawptr);
+		FatalErrorHandler::failIf(size != actualSize,
+			"nanos6_lfree: size ", size, " does not match actual size ", actualSize);
+	}
+
+	// Free the full allocated region
+	size_t totalSize = cacheLineSize + roundedSize;
+	MemoryAllocator::free(rawptr, totalSize);
+}
+
+void ClusterMemoryManagement::lfree(void *ptr)
+{
+	// This version of lfree can only be called on the node that did the lmalloc.
+	// The other nodes don't have a copy of the recorded size.
+	FatalErrorHandler::failIf(!VirtualMemoryManagement::isLocalRegion(DataAccessRegion(ptr,1)),
+		"Cannot call nanos6_lfree1 on region allocated on a different node");
+
+	// Extract size
+	size_t cacheLineSize = HardwareInfo::getCacheLineSize();
+	void *rawptr = (void *)((char *)ptr - cacheLineSize);
+	size_t actualSize = *((size_t *)rawptr);
+
+	// Free memory using the actual size
+	ClusterMemoryManagement::lfree(ptr, actualSize, /* checkSize */ false);
 }
