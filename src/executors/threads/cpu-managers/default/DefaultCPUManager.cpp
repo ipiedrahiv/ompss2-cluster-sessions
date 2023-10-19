@@ -135,6 +135,10 @@ void DefaultCPUManager::initialize()
 {
 	const size_t nWorkers = _cpus.size() - _reserveCPUforLeaderThread;
 
+	assert(_cpus.size() > 0);
+	FatalErrorHandler::failIf(nWorkers == 0,
+		"Nanos6@Cluster requires at least 2 cores when cpumanager.reserve_cpu_leader = true");
+
 	for (size_t id = 0; id < _cpus.size(); ++id) {
 		CPU *cpu = _cpus[id];
 		assert(cpu != nullptr);
