@@ -67,6 +67,8 @@ private:
 
 	static ClusterMemoryManagement _singleton;
 
+	static size_t getDmallocSize(void *ptr);
+
 public:
 
 	static inline const dmalloc_container_t &getMallocsList()
@@ -96,6 +98,8 @@ public:
 	);
 
 	static void dfree(void *ptr, size_t size);
+
+	static void dfree(void *ptr);
 
 	static void *lmalloc(size_t size);
 
