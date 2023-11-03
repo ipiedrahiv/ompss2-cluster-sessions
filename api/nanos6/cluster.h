@@ -155,6 +155,11 @@ void *nanos6_dmalloc(size_t size, nanos6_data_distribution_t policy, size_t num_
 //! \param[in] size is the size of the distributed memory allocation
 void nanos6_dfree(void *ptr, size_t size);
 
+//! \brief deallocate a distributed array.
+//
+//! \param[in] ptr is a pointer to memory previously allocated with nanos6_dmalloc
+void nanos6_dfree1(void *ptr);
+
 //! \brief Allocate local memory
 //!
 //! \param[in] size is the size (in bytes) of local memory to allocate

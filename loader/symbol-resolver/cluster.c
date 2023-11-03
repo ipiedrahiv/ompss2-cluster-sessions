@@ -18,6 +18,7 @@ RESOLVE_API_FUNCTION(nanos6_get_num_cluster_iranks, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_get_namespace_is_enabled, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_dmalloc, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_dfree, "cluster", NULL);
+RESOLVE_API_FUNCTION(nanos6_dfree1, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_lmalloc, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_lfree, "cluster", NULL);
 RESOLVE_API_FUNCTION(nanos6_lfree1, "cluster", NULL);
