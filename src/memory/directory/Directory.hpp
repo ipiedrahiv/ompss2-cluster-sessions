@@ -105,6 +105,16 @@ public:
 		_homeNodes.erase(region);
 	}
 
+	static inline void readLock()
+	{
+		_lock.readLock();
+	}
+
+	static inline void readUnlock()
+	{
+		_lock.readUnlock();
+	}
+
 	static inline void writeLock()
 	{
 		_lock.writeLock();

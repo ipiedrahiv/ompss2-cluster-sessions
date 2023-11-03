@@ -84,6 +84,11 @@ extern "C" {
 		ClusterMemoryManagement::dfree(ptr, size);
 	}
 
+	void nanos6_dfree1(void *ptr)
+	{
+		ClusterMemoryManagement::dfree(ptr);
+	}
+
 	void *nanos6_lmalloc(size_t size)
 	{
 		if (size == 0) {

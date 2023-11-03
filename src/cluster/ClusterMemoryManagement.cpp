@@ -39,6 +39,19 @@ void ClusterMemoryManagement::registerDmalloc(const DmallocDataInfo *dmallocData
 	Directory::writeUnlock();
 }
 
+size_t ClusterMemoryManagement::getDmallocSize(void *ptr)
+{
+	Directory::readLock();
+	for (DmallocDataInfo *dmallocInfo : _singleton._dmallocs) {
+		if (dmallocInfo->_region.getStartAddress() == ptr) {
+			Directory::readUnlock();
+			return dmallocInfo->_region.getSize();
+		}
+	}
+	Directory::readUnlock();
+	FatalErrorHandler::fail("dfree/dfree1: No dmalloc found at address ", ptr);
+}
+
 // Unregister a dmalloc by removing it from the list and unregistering the allocation with the
 // directory. Return true if successful.
 bool ClusterMemoryManagement::unregisterDmalloc(DataAccessRegion const &region)
@@ -188,6 +201,9 @@ void *ClusterMemoryManagement::dmalloc(
 
 void ClusterMemoryManagement::dfree(void *ptr, size_t size)
 {
+	size_t actualSize = getDmallocSize(ptr);
+	FatalErrorHandler::failIf(size != actualSize,
+							 "nanos6_dmalloc of ", ptr, ":", size, " does not correspond to actual size of ", actualSize);
 	assert(ptr != nullptr);
 	assert(size > 0);
 
@@ -207,6 +223,12 @@ void ClusterMemoryManagement::dfree(void *ptr, size_t size)
 
 		ClusterMemoryManagement::handleDfreeMessage(&msg);
 	}
+}
+
+void ClusterMemoryManagement::dfree(void *ptr)
+{
+	size_t actualSize = getDmallocSize(ptr);
+	dfree(ptr, actualSize);
 }
 
 void *ClusterMemoryManagement::lmalloc(size_t size)

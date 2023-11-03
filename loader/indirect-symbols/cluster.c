@@ -207,6 +207,19 @@ void nanos6_dfree(void *ptr, size_t size)
 	(*symbol)(ptr, size);
 }
 
+void nanos6_dfree1(void *ptr)
+{
+	typedef void nanos6_dfree1_t(void *);
+
+	static nanos6_dfree1_t *symbol = NULL;
+	if (__builtin_expect(symbol == NULL, 0)) {
+		symbol = (nanos6_dfree1_t *) _nanos6_resolve_symbol(
+				"nanos6_dfree1", "cluster", NULL);
+	}
+
+	(*symbol)(ptr);
+}
+
 void *nanos6_lmalloc(size_t size)
 {
 	typedef void *nanos6_lmalloc_t(size_t);
