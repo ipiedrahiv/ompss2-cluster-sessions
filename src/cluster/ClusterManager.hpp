@@ -670,7 +670,7 @@ public:
 
 	static int nanos6GetInfo(nanos6_cluster_info_t *info);
 
-#if HAVE_SLURM
+//#if HAVE_SLURM
 	void initializeMalleabilityVars();
 
 	// Spawn all processes at once; rely on slurm srun policy.. Use this policy only for profiling
@@ -689,7 +689,7 @@ public:
 	static int handleResizeMessage(const MessageShrink *msgShrink);
 
 	static int nanos6Resize(int delta, nanos6_spawn_policy_t policy);
-#endif // HAVE_SLURM
+//#endif // HAVE_SLURM
 
 };
 

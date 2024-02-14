@@ -13,6 +13,8 @@
 
 #include "messages/MessageDmalloc.hpp"
 #include "messages/MessageSysFinish.hpp"
+
+
 #include "messages/MessageResize.hpp"
 #include "messages/MessageResizeImplementation.hpp"
 
@@ -475,6 +477,7 @@ int ClusterManager::nanos6Resize(int delta, nanos6_spawn_policy_t policy)
 		}
 
 		// TODO: Any spawn policy to implement may be done here in the hostInfos.
+		
 		std::vector<MessageSpawnHostInfo> hostInfos = SlurmAPI::getSpawnHostInfoVector(delta);
 		if (hostInfos.empty()){
 			FatalErrorHandler::warn("There are not hosts/spots to spawn more processes");
@@ -542,13 +545,14 @@ int ClusterManager::nanos6Resize(int delta, nanos6_spawn_policy_t policy)
 			newSize != expectedSize,
 			"Couldn't spawn: ", expectedSize, " new processes; only: ", newSize, " were created."
 		);
-
+		#ifdef HAVE_SLURM
 		if (SlurmAPI::permitsExpansion()) {
 			// We don't want to (really) release the hosts back to slurm IF permitsExpansion is
 			// disabled, because it may be impossible to reallocate them back in the future.
 			const int releasedHosts = SlurmAPI::releaseUnusedHosts();
 			FatalErrorHandler::failIf(releasedHosts < 0, "Error releasing hosts with SlurmAPI");
 		}
+		#endif
 
 	}
 

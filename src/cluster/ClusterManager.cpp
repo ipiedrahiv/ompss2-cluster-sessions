@@ -33,9 +33,7 @@
 
 #include "executors/threads/CPUManager.hpp"
 
-#ifdef HAVE_SLURM
 #include "SlurmAPI.hpp"
-#endif
 
 TaskOffloading::RemoteTasksInfoMap *TaskOffloading::RemoteTasksInfoMap::_singleton = nullptr;
 TaskOffloading::OffloadedTasksInfoMap *TaskOffloading::OffloadedTasksInfoMap::_singleton = nullptr;
@@ -193,13 +191,13 @@ void ClusterManager::initialize(int argc, char **argv)
 		_singleton = new ClusterManager(commType.getValue(), argc, argv);
 		assert(_singleton != nullptr);
 
-#if HAVE_SLURM
+//#if HAVE_SLURM
 		_singleton->initializeMalleabilityVars();
-#else // HAVE_SLURM
+//#else // HAVE_SLURM
 		FatalErrorHandler::failIf(
 			ClusterManager::isSpawned(), "Can spawn process without malleability support."
 		);
-#endif // HAVE_SLURM
+//#endif // HAVE_SLURM
 	}
 }
 

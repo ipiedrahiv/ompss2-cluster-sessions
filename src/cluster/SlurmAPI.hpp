@@ -7,6 +7,8 @@
 #ifndef SLURMAPI_HPP
 #define SLURMAPI_HPP
 
+#ifdef HAVE_SLURM // IF SLURM API AVAILABLE
+
 #include <cstdlib>
 #include <ctime>
 #include <string>
@@ -612,4 +614,63 @@ public:
 
 };
 
+#else // IF NOT HAVE_SLURM
+
+class SlurmAPI {
+private:
+	static SlurmAPI *_singleton;
+	
+public:
+	static void initialize()
+	{
+		assert(ClusterManager::isMasterNode());
+		assert(_singleton == nullptr);
+		_singleton = new SlurmAPI();
+		assert(_singleton != nullptr);
+	}
+
+	static void finalize()
+	{
+		assert(_singleton != nullptr);
+		delete _singleton;
+		_singleton = nullptr;
+	}
+
+	static bool isEnabled()
+	{
+		return false;
+	}
+
+	static void deltaProcessToHostname(__attribute__((unused)) const std::string &hostname, __attribute__((unused)) int delta)
+	{
+	}
+
+	static int requestHostsForNRanks(__attribute__((unused)) size_t N)
+	{
+		return -1;
+	}
+
+	static int checkAllocationRequest()
+	{
+		return -1;
+	}
+	
+	static std::vector<MessageSpawnHostInfo> getSpawnHostInfoVector(__attribute__((unused)) size_t delta)
+	{
+		std::vector<MessageSpawnHostInfo> hostInfos = {};
+		return hostInfos; 
+	}
+	
+	static bool permitsExpansion()
+	{
+		return false;
+	}
+	
+	static void killJobRequestIfPending()
+	{
+	}
+
+};
+
+#endif // HAVE_SLURM
 #endif // SLURMAPI_HPP

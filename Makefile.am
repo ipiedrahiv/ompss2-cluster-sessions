@@ -1384,8 +1384,6 @@ noinst_HEADERS += \
 	src/cluster/messages/MessageSysFinish.hpp \
 	src/cluster/messages/MessageTaskNew.hpp \
 	src/cluster/messenger/TransferBase.hpp \
-	src/cluster/messages/MessageResize.hpp \
-	src/cluster/messages/MessageResizeImplementation.hpp \
 	src/cluster/messenger/DataTransfer.hpp \
 	src/cluster/messenger/LiveDataTransfers.hpp \
 	src/cluster/messenger/Messenger.hpp \
@@ -1411,10 +1409,13 @@ noinst_HEADERS += \
 	src/scheduling/schedulers/cluster/ClusterLocalityScheduler.hpp \
 	src/scheduling/schedulers/cluster/ClusterHomeScheduler.hpp \
 	src/scheduling/schedulers/cluster/ClusterBalanceScheduler.hpp \
-	src/scheduling/schedulers/cluster/ClusterRandomScheduler.hpp
+	src/scheduling/schedulers/cluster/ClusterRandomScheduler.hpp \
+	src/cluster/messages/MessageResize.hpp \
+	src/cluster/messages/MessageResizeImplementation.hpp
 
 if HAVE_SLURM
 noinst_HEADERS += src/cluster/SlurmAPI.hpp
+
 endif # HAVE_SLURM
 
 memory_default_sources = $(memory_allocator_default_sources) $(vmm_cluster_sources)
