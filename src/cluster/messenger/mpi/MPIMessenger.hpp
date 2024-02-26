@@ -22,6 +22,11 @@ class DataTransfer;
 
 class MPIMessenger : public Messenger {
 private:
+	#ifdef HAVE_SESSIONS
+		MPI_Session sessionHandle;
+		MPI_Group sessionWorldGroup;
+		MPI_Comm MPI_SESSION_WORLD_COMM;
+	#endif
 
 	bool _mpi_comm_data_raw = 0;
 
