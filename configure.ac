@@ -246,6 +246,9 @@ fi
 # Check TAMPI (after cluster)
 AC_CHECK_TAMPI
 
+# Check MPI sessions
+AC_CHECK_SESSIONS
+
 # Check if we should enable Execution Workflow support
 AC_ARG_ENABLE(
 	[execution-workflow],
@@ -379,6 +382,14 @@ _AS_ECHO([   clock LIBS... ${CLOCK_LIBS}])
 _AS_ECHO([])
 _AS_ECHO_N([   Optimization is enabled... ])
 if test x"${ac_build_optimized}" = x"yes" ; then
+	AC_MSG_RESULT([yes])
+else
+	AC_MSG_RESULT([no])
+fi
+
+_AS_ECHO([])
+_AS_ECHO_N([   MPISessions are enabled... ])
+if test x"${ac_use_sessions}" = x"yes" ; then
 	AC_MSG_RESULT([yes])
 else
 	AC_MSG_RESULT([no])
