@@ -38,3 +38,4 @@ common/
 compile_commands.json
 .clangd
 .dir-locals.el
+install_nanos6/
