@@ -59,7 +59,7 @@ struct HackReport {
 
 	void init(int _oldSize, int _newSize, int _delta)
 	{
-		assert(_newSize = _oldSize + _delta);
+		assert(_newSize == _oldSize + _delta);
 
 		clock_gettime(CLOCK_MONOTONIC, &startResize);
 
