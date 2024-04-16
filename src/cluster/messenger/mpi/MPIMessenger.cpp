@@ -156,7 +156,6 @@ void MPIMessenger::getNodeNumber()
 
 	// Find and broadcast number of nodes
 	int maxNodeNum;
-	#ifdef HAVE_SESSIONS
 	MPI_Reduce(&_physicalNodeNum, &maxNodeNum, 1, MPI_INT, MPI_MAX, 0, WORLD_COMM);
 	_numNodes = maxNodeNum + 1;  // only valid on rank 0 of WORLD_COMM
 	MPI_Bcast(&_numNodes, 1, MPI_INT, 0, WORLD_COMM);
@@ -165,16 +164,6 @@ void MPIMessenger::getNodeNumber()
 	MPI_Comm comm_within_node;
 	MPI_Comm_split(WORLD_COMM, /* color */ _physicalNodeNum, /* key */_externalRank, &comm_within_node);
 	MPI_Comm_rank(comm_within_node, &_indexThisPhysicalNode);
-	#else
-	MPI_Reduce(&_physicalNodeNum, &maxNodeNum, 1, MPI_INT, MPI_MAX, 0, WORLD_COMM);
-	_numNodes = maxNodeNum + 1;  // only valid on rank 0 of WORLD_COMM
-	MPI_Bcast(&_numNodes, 1, MPI_INT, 0, WORLD_COMM);
-
-	// Find index among instances on the same node
-	MPI_Comm comm_within_node;
-	MPI_Comm_split(WORLD_COMM, /* color */ _physicalNodeNum, /* key */_externalRank, &comm_within_node);
-	MPI_Comm_rank(comm_within_node, &_indexThisPhysicalNode);
-	#endif
 }
 
 void MPIMessenger::splitCommunicator(const std::string &clusterSplit)
@@ -188,11 +177,7 @@ void MPIMessenger::splitCommunicator(const std::string &clusterSplit)
 	setApprankNumber(clusterSplit, /* out */ internalRank);
 
 	// Create intra communicator for this apprank (_wrank and _wsize will be determined from this)
-	#ifdef HAVE_SESSIONS
-		MPI_Comm_split(WORLD_COMM, /* color */ _apprankNum, /* key */ internalRank, &INTRA_COMM);
-	#else
-		MPI_Comm_split(WORLD_COMM, /* color */ _apprankNum, /* key */ internalRank, &INTRA_COMM);
-	#endif
+	MPI_Comm_split(WORLD_COMM, /* color */ _apprankNum, /* key */ internalRank, &INTRA_COMM);
 }
 
 MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
@@ -222,8 +207,14 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 
 	#ifdef HAVE_SESSIONS
 		// Session based:
+		// Set up info to get multithreaded support
+		const char mt_key[] = "thread_level";
+		const char mt_value[] = "MPI_THREAD_MULTIPLE";
+		MPI_Info sinfo = MPI_INFO_NULL;
+		MPI_Info_create(&sinfo);
+		MPI_Info_set(sinfo, mt_key, mt_value);
 		//MPI_Session session;
-		ret = MPI_Session_init(MPI_INFO_NULL, MPI_ERRORS_RETURN, &sessionHandle);
+		ret = MPI_Session_init(sinfo, MPI_ERRORS_RETURN, &sessionHandle);
 		//MPI_Group group = MPI_GROUP_NULL;
 		ret = MPI_Group_from_session_pset(sessionHandle, "mpi://WORLD", &sessionWorldGroup);
 		//MPI_Comm WORLD_COMM = MPI_COMM_NULL;
@@ -238,11 +229,7 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 	}
 	#endif
 	int groupSize = 0;
-	#ifdef HAVE_SESSIONS
-		ret = MPI_Comm_size(WORLD_COMM, &groupSize);
-	#else
-		ret = MPI_Comm_size(WORLD_COMM, &groupSize);
-	#endif
+	ret = MPI_Comm_size(WORLD_COMM, &groupSize);
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 	assert(groupSize > 0);
 
@@ -255,21 +242,12 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 
 	//! Save the parent communicator
 	ret = MPI_Comm_get_parent(&PARENT_COMM);
-	#ifdef HAVE_SESSIONS
-		MPIErrorHandler::handle(ret, WORLD_COMM);
-	#else
-		MPIErrorHandler::handle(ret, WORLD_COMM);
-	#endif
+	MPIErrorHandler::handle(ret, WORLD_COMM);
 	ConfigVariable<std::string> clusterSplitEnv("cluster.hybrid.split");
 	if (!clusterSplitEnv.isPresent()) {
 		// When there is not parent this is part of the initial communicator.
-		#ifdef HAVE_SESSIONS
-			ret = MPI_Comm_dup(WORLD_COMM, &INTRA_COMM);
-			MPIErrorHandler::handle(ret, WORLD_COMM);
-		#else
-			ret = MPI_Comm_dup(WORLD_COMM, &INTRA_COMM);
-			MPIErrorHandler::handle(ret, WORLD_COMM);
-		#endif
+		ret = MPI_Comm_dup(WORLD_COMM, &INTRA_COMM);
+		MPIErrorHandler::handle(ret, WORLD_COMM);
 		char commname[MPI_MAX_OBJECT_NAME];
 		snprintf(commname, MPI_MAX_OBJECT_NAME - 1, "INTRA_WORLD_%s",
 			(PARENT_COMM != MPI_COMM_NULL ? "spawned" : "nospawned"));
@@ -289,13 +267,8 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 		getNodeNumber();
 		
 		//! Get external rank (in WORLD_COMM)
-		#ifdef HAVE_SESSIONS
-			ret = MPI_Comm_size(WORLD_COMM, &_numExternalRanks);
-			ret = MPI_Comm_rank(WORLD_COMM, &_externalRank);
-		#else
-			ret = MPI_Comm_size(WORLD_COMM, &_numExternalRanks);
-			ret = MPI_Comm_rank(WORLD_COMM, &_externalRank);
-		#endif
+		ret = MPI_Comm_size(WORLD_COMM, &_numExternalRanks);
+		ret = MPI_Comm_rank(WORLD_COMM, &_externalRank);
 		// When there is not parent it is part of the initial communicator.
 		if (clusterSplitEnv.isPresent() && clusterSplitEnv.getValue().length() > 0) {
 			// Run in hybrid MPI + OmpSs-2@Cluster mode
@@ -327,21 +300,13 @@ MPIMessenger::MPIMessenger(int argc, char **argv) : Messenger(argc, argv)
 
 		// This is a spawned process, so merge with the parent communicator..
 		ret = MPI_Intercomm_merge(PARENT_COMM, true,  &INTRA_COMM);
-		#ifdef HAVE_SESSIONS
-			MPIErrorHandler::handle(ret, WORLD_COMM);
-		#else
-			MPIErrorHandler::handle(ret, WORLD_COMM);
-		#endif
+		MPIErrorHandler::handle(ret, WORLD_COMM);
 	}
 
 	//! Get the upper-bound tag supported by current MPI implementation
 	int ubIsSetFlag = 0, *mpi_ub_tag = nullptr;
 	ret = MPI_Comm_get_attr(INTRA_COMM, MPI_TAG_UB, &mpi_ub_tag, &ubIsSetFlag);
-	#ifdef HAVE_SESSIONS
-		MPIErrorHandler::handle(ret, WORLD_COMM);
-	#else
-		MPIErrorHandler::handle(ret, WORLD_COMM);
-	#endif
+	MPIErrorHandler::handle(ret, WORLD_COMM);
 	assert(mpi_ub_tag != nullptr);
 	assert(ubIsSetFlag != 0);
 
@@ -391,40 +356,24 @@ void MPIMessenger::shutdown()
 #ifndef NDEBUG
 		int compare = 0;
 		ret = MPI_Comm_compare(INTRA_COMM_DATA_RAW, INTRA_COMM, &compare);
-		#ifdef HAVE_SESSIONS
-			MPIErrorHandler::handle(ret, WORLD_COMM);
-		#else
-			MPIErrorHandler::handle(ret, WORLD_COMM);
-		#endif
+		MPIErrorHandler::handle(ret, WORLD_COMM);
 		assert(compare !=  MPI_IDENT);
 #endif // NDEBUG
 
 		//! Release the INTRA_COMM_DATA_RAW
 		ret = MPI_Comm_free(&INTRA_COMM_DATA_RAW);
-		#ifdef HAVE_SESSIONS
-			MPIErrorHandler::handle(ret, WORLD_COMM);
-		#else
-			MPIErrorHandler::handle(ret, WORLD_COMM);
-		#endif
+		MPIErrorHandler::handle(ret, WORLD_COMM);
 	}
 
 	//! Release the intra-communicator
 	ret = MPI_Comm_free(&INTRA_COMM);
-	#ifdef HAVE_SESSIONS
-		MPIErrorHandler::handle(ret, WORLD_COMM);
-	#else
-		MPIErrorHandler::handle(ret, WORLD_COMM);
-	#endif
+	MPIErrorHandler::handle(ret, WORLD_COMM);
 
 	
 	//ret = MPI_Finalize();
 	//ret = MPI_Session_finalize(&sessionHandle);
 	ret = MPI_Finalize();
-	#ifdef HAVE_SESSIONS
-		MPIErrorHandler::handle(ret, WORLD_COMM);
-	#else
-		MPIErrorHandler::handle(ret, WORLD_COMM);
-	#endif
+	MPIErrorHandler::handle(ret, WORLD_COMM);
 
 	// After MPI finalization there shouldn't be any pending message. But we don't actually know if
 	// some delayed message has arrived from a third remote node. So we clear here and the latter
@@ -455,21 +404,12 @@ size_t MPIMessenger::calcNumInstancesThisNode()
 {
 	// Make a temporary communicator of all ranks with the same _physicalNodeNum
 	MPI_Comm tempNodeComm;
-	#ifdef HAVE_SESSIONS
 	int ret = MPI_Comm_split(
 		WORLD_COMM,
 		/* color */ _physicalNodeNum,
 		/* key */ _externalRank,
 		&tempNodeComm
 	);
-	#else
-	int ret = MPI_Comm_split(
-		WORLD_COMM,
-		/* color */ _physicalNodeNum,
-		/* key */ _externalRank,
-		&tempNodeComm
-	);
-	#endif
 	int numInstancesThisNode = 0;
 	ret = MPI_Comm_size(tempNodeComm, &numInstancesThisNode);
 	ret = MPI_Comm_free(&tempNodeComm);
@@ -483,11 +423,7 @@ void MPIMessenger::shareDLBInfo()
 	// MPI_Iallgather with a waitall at the end of all to create a single synchronization point.
 
 	// Create the application communicator (Hybrid MPI+OmpSs applications)
-	#ifdef HAVE_SESSIONS
-		int ret = MPI_Comm_split(WORLD_COMM, _wrank, _apprankNum, &APP_COMM);
-	#else
-		int ret = MPI_Comm_split(WORLD_COMM, _wrank, _apprankNum, &APP_COMM);
-	#endif
+	int ret = MPI_Comm_split(WORLD_COMM, _wrank, _apprankNum, &APP_COMM);
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 	if (_wrank > 0) {
 		//! Invalid to use application communicator on slave nodes
@@ -505,21 +441,12 @@ void MPIMessenger::shareDLBInfo()
 	// This node to external rank
 	_instanceThisNodeToExternalRank.resize(_numInstancesThisNode);
 	MPI_Comm tempNodeComm;
-	#ifdef HAVE_SESSIONS
 	ret = MPI_Comm_split(
 		WORLD_COMM,
 		/* color */ _physicalNodeNum,
 		/* key */ _indexThisPhysicalNode,
 		&tempNodeComm
 	);
-	#else
-	ret = MPI_Comm_split(
-		WORLD_COMM,
-		/* color */ _physicalNodeNum,
-		/* key */ _indexThisPhysicalNode,
-		&tempNodeComm
-	);
-	#endif
 	MPIErrorHandler::handle(ret, INTRA_COMM);
 
 #ifndef NDEBUG
@@ -723,15 +650,9 @@ DataTransfer *MPIMessenger::fetchData(
 void MPIMessenger::synchronizeWorld(void)
 {
 	disableTAMPITaskAwareness();
-	#ifdef HAVE_SESSIONS
-		int ret = MPI_Barrier(WORLD_COMM);
-		enableTAMPITaskAwareness();
-		MPIErrorHandler::handle(ret, WORLD_COMM);
-	#else
-		int ret = MPI_Barrier(WORLD_COMM);
-		enableTAMPITaskAwareness();
-		MPIErrorHandler::handle(ret, WORLD_COMM);
-	#endif
+	int ret = MPI_Barrier(WORLD_COMM);
+	enableTAMPITaskAwareness();
+	MPIErrorHandler::handle(ret, WORLD_COMM);
 }
 
 void MPIMessenger::synchronizeAll(void)
